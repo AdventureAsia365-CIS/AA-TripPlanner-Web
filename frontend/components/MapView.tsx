@@ -81,9 +81,14 @@ export default function MapView() {
       console.error("[mapbox error]", e?.error?.message ?? e);
     });
 
-    // If the container's size settles after the map is created (common in
-    // flex layouts), Mapbox can lock onto a 0x0 canvas. A ResizeObserver
-    // keeps the canvas in sync with the container.
+    // The map is created inside useEffect (after first paint), but Mapbox
+    // still frequently measures the container before layout settles and
+    // locks the canvas at its 400x300 default. Force a resize on the next
+    // animation frames, and keep a ResizeObserver for later layout changes.
+    const raf1 = requestAnimationFrame(() => {
+      map.resize();
+      requestAnimationFrame(() => map.resize());
+    });
     const ro = new ResizeObserver(() => map.resize());
     ro.observe(containerRef.current);
 
@@ -159,6 +164,7 @@ export default function MapView() {
     });
 
     return () => {
+      cancelAnimationFrame(raf1);
       ro.disconnect();
       map.remove();
       mapRef.current = null;
