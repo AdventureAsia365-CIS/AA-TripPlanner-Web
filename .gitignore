@@ -1,0 +1,26 @@
+# Node / Next.js
+node_modules/
+.next/
+out/
+.vercel/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.egg-info/
+
+# Build artifacts
+dist/
+build/
+*.zip
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Local temp
+.git.out
