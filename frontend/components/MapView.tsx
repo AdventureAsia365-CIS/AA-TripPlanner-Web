@@ -74,6 +74,19 @@ export default function MapView() {
     });
     mapRef.current = map;
 
+    // Mapbox reports token/style/worker problems via an 'error' event, not
+    // a thrown exception — so a broken map leaves the JS console clean.
+    map.on("error", (e) => {
+      // eslint-disable-next-line no-console
+      console.error("[mapbox error]", e?.error?.message ?? e);
+    });
+
+    // If the container's size settles after the map is created (common in
+    // flex layouts), Mapbox can lock onto a 0x0 canvas. A ResizeObserver
+    // keeps the canvas in sync with the container.
+    const ro = new ResizeObserver(() => map.resize());
+    ro.observe(containerRef.current);
+
     map.on("load", () => {
       map.resize(); // ensure canvas matches container after first layout
       map.addSource(SOURCE_ID, {
@@ -146,6 +159,7 @@ export default function MapView() {
     });
 
     return () => {
+      ro.disconnect();
       map.remove();
       mapRef.current = null;
     };
