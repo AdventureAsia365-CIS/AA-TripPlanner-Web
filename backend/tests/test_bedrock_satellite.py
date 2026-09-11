@@ -1,0 +1,158 @@
+"""Unit tests for the Bedrock satellite — fully stubbed, no live AWS."""
+from __future__ import annotations
+
+import io
+import json
+
+import pytest
+
+from backend import config
+from backend.shared import bedrock_satellite as bs
+
+
+@pytest.fixture(autouse=True)
+def _role_configured(monkeypatch):
+    # Ensure a role name exists so _role_arn doesn't raise.
+    monkeypatch.setattr(config, "BEDROCK_ROLE_NAME", "TripPlannerBedrockRole")
+    monkeypatch.setattr(config, "BEDROCK_ACCT_PRIMARY", "111111111111")
+    monkeypatch.setattr(config, "BEDROCK_ACCT_FALLBACK", "222222222222")
+
+
+# --- Stub building blocks ---------------------------------------------------
+
+class StubSts:
+    def __init__(self, account_seen: list):
+        self._seen = account_seen
+
+    def assume_role(self, *, RoleArn, RoleSessionName):
+        # Record which account's role was assumed.
+        acct = RoleArn.split(":")[4]
+        self._seen.append(acct)
+        return {
+            "Credentials": {
+                "AccessKeyId": f"AKIA-{acct}",
+                "SecretAccessKey": "secret",
+                "SessionToken": "token",
+            }
+        }
+
+
+class _Body:
+    def __init__(self, payload: dict):
+        self._raw = json.dumps(payload).encode()
+
+    def read(self):
+        return self._raw
+
+
+class StubBedrock:
+    def __init__(self, *, fail: bool = False, response: dict | None = None,
+                 stream_chunks: list[dict] | None = None):
+        self._fail = fail
+        self._response = response or {"ok": True}
+        self._stream_chunks = stream_chunks or []
+
+    def invoke_model(self, *, modelId, body, **kwargs):
+        if self._fail:
+            raise RuntimeError("simulated primary failure")
+        return {"body": _Body(self._response)}
+
+    def invoke_model_with_response_stream(self, *, modelId, body, **kwargs):
+        if self._fail:
+            raise RuntimeError("simulated primary stream failure")
+        events = [
+            {"chunk": {"bytes": json.dumps(c).encode()}}
+            for c in self._stream_chunks
+        ]
+        return {"body": iter(events)}
+
+
+def make_factory(*, primary_bedrock: StubBedrock, fallback_bedrock: StubBedrock,
+                 account_seen: list, primary="111111111111"):
+    """Return a ClientFactory that routes bedrock clients by which account's
+    STS creds were used (encoded in the access key id)."""
+
+    def factory(service, *, creds=None, region=None):
+        if service == "sts":
+            return StubSts(account_seen)
+        if service == "bedrock-runtime":
+            acct = creds.access_key_id.split("-")[1]
+            return primary_bedrock if acct == primary else fallback_bedrock
+        raise AssertionError(f"unexpected service {service}")
+
+    return factory
+
+
+# --- Tests ------------------------------------------------------------------
+
+def test_invoke_succeeds_on_primary():
+    seen: list = []
+    factory = make_factory(
+        primary_bedrock=StubBedrock(response={"result": 42}),
+        fallback_bedrock=StubBedrock(fail=True),
+        account_seen=seen,
+    )
+    out = bs.invoke("model-x", {"prompt": "hi"}, client_factory=factory)
+    assert out == {"result": 42}
+    # Only the primary account was assumed.
+    assert seen == ["111111111111"]
+
+
+def test_invoke_fails_over_to_fallback():
+    seen: list = []
+    factory = make_factory(
+        primary_bedrock=StubBedrock(fail=True),
+        fallback_bedrock=StubBedrock(response={"result": "from-fallback"}),
+        account_seen=seen,
+    )
+    out = bs.invoke("model-x", {"prompt": "hi"}, client_factory=factory)
+    assert out == {"result": "from-fallback"}
+    # Both accounts were attempted, primary first.
+    assert seen == ["111111111111", "222222222222"]
+
+
+def test_invoke_raises_when_both_fail():
+    seen: list = []
+    factory = make_factory(
+        primary_bedrock=StubBedrock(fail=True),
+        fallback_bedrock=StubBedrock(fail=True),
+        account_seen=seen,
+    )
+    with pytest.raises(bs.BedrockError):
+        bs.invoke("model-x", {"prompt": "hi"}, client_factory=factory)
+    assert seen == ["111111111111", "222222222222"]
+
+
+def test_invoke_stream_yields_chunks():
+    seen: list = []
+    chunks = [{"delta": "Hello"}, {"delta": " world"}]
+    factory = make_factory(
+        primary_bedrock=StubBedrock(stream_chunks=chunks),
+        fallback_bedrock=StubBedrock(fail=True),
+        account_seen=seen,
+    )
+    got = list(bs.invoke_stream("model-x", {"prompt": "hi"}, client_factory=factory))
+    assert got == chunks
+
+
+def test_embed_returns_vector():
+    seen: list = []
+    factory = make_factory(
+        primary_bedrock=StubBedrock(response={"embedding": [0.1, 0.2, 0.3]}),
+        fallback_bedrock=StubBedrock(fail=True),
+        account_seen=seen,
+    )
+    vec = bs.embed("some text", client_factory=factory)
+    assert vec == [0.1, 0.2, 0.3]
+
+
+def test_missing_role_raises(monkeypatch):
+    monkeypatch.setattr(config, "BEDROCK_ROLE_NAME", "")
+    seen: list = []
+    factory = make_factory(
+        primary_bedrock=StubBedrock(),
+        fallback_bedrock=StubBedrock(),
+        account_seen=seen,
+    )
+    with pytest.raises(bs.BedrockError):
+        bs.invoke("model-x", {"prompt": "hi"}, client_factory=factory)
