@@ -55,14 +55,20 @@ async def _lookup_cached(pool: _Pool, name: str) -> Optional[Destination]:
 
 
 async def _mapbox_forward(
-    http: httpx.AsyncClient, name: str, country: str
+    http: httpx.AsyncClient, name: str, country: str, region: str = ""
 ) -> tuple[float, float]:
-    """Return (lat, lng) for a place name. Raises GeocodeError on no match."""
+    """Return (lat, lng) for a place name. Raises GeocodeError on no match.
+
+    `region` (e.g. the tour's country/area, derived from its name) is
+    appended to the query text to disambiguate — without it Mapbox often
+    returns a same-named place on the wrong continent.
+    """
     if not config.MAPBOX_GEOCODING_TOKEN:
         raise GeocodeError("MAPBOX_GEOCODING_TOKEN is not set.")
     from urllib.parse import quote
 
-    url = f"{config.MAPBOX_GEOCODING_URL}/{quote(name)}.json"
+    query = f"{name}, {region}" if region else name
+    url = f"{config.MAPBOX_GEOCODING_URL}/{quote(query)}.json"
     params = {
         "access_token": config.MAPBOX_GEOCODING_TOKEN,
         "limit": "1",
@@ -104,6 +110,7 @@ async def geocode_place(
     pool: _Pool,
     http: httpx.AsyncClient,
     mem_cache: Optional[dict[str, Destination]] = None,
+    region: str = "",
 ) -> Destination:
     """Resolve a place to a shared.destinations row, geocoding on cache miss.
 
@@ -123,7 +130,7 @@ async def geocode_place(
             return cached
 
     normalized_country = normalize_country(country)
-    lat, lng = await _mapbox_forward(http, name, normalized_country)
+    lat, lng = await _mapbox_forward(http, name, normalized_country, region)
 
     row = await pool.fetchrow(
         "INSERT INTO shared.destinations (name, country, lat, lng) "
