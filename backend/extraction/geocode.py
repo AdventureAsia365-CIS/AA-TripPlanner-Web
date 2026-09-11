@@ -81,21 +81,46 @@ async def _mapbox_forward(
     return lat, lng
 
 
+async def preload_cache(pool: _Pool) -> dict[str, Destination]:
+    """Load all shared.destinations into an in-memory map keyed by
+    lower(name). Lets a batch run avoid one DB SELECT per place over a
+    high-latency tunnel. Optional — pass the result as `mem_cache`."""
+    rows = await pool.fetch(  # type: ignore[attr-defined]
+        "SELECT id, name, country, lat, lng FROM shared.destinations"
+    )
+    cache: dict[str, Destination] = {}
+    for r in rows:
+        cache[r["name"].lower()] = Destination(
+            id=str(r["id"]), name=r["name"], country=r["country"],
+            lat=r["lat"], lng=r["lng"],
+        )
+    return cache
+
+
 async def geocode_place(
     name: str,
     country: str,
     *,
     pool: _Pool,
     http: httpx.AsyncClient,
+    mem_cache: Optional[dict[str, Destination]] = None,
 ) -> Destination:
     """Resolve a place to a shared.destinations row, geocoding on cache miss.
 
     Idempotent: concurrent-safe via ON CONFLICT on the unique lower(name)
     index — if two runs race, the second reuses the first's row.
+
+    If `mem_cache` is provided, it is consulted first (and updated on
+    insert), avoiding a DB round-trip per already-known place.
     """
-    cached = await _lookup_cached(pool, name)
-    if cached is not None:
-        return cached
+    key = name.lower()
+    if mem_cache is not None and key in mem_cache:
+        return mem_cache[key]
+
+    if mem_cache is None:
+        cached = await _lookup_cached(pool, name)
+        if cached is not None:
+            return cached
 
     normalized_country = normalize_country(country)
     lat, lng = await _mapbox_forward(http, name, normalized_country)
@@ -110,10 +135,13 @@ async def geocode_place(
         lat,
         lng,
     )
-    return Destination(
+    dest = Destination(
         id=str(row["id"]),
         name=row["name"],
         country=row["country"],
         lat=row["lat"],
         lng=row["lng"],
     )
+    if mem_cache is not None:
+        mem_cache[key] = dest
+    return dest

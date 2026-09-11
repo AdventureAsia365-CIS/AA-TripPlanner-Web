@@ -27,3 +27,5 @@ Thumbs.db
 # Local temp
 *.out
 /package-lock.json
+/.dbcheck*.py
+/.probe*.sql
