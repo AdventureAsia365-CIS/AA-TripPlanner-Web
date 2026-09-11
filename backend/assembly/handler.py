@@ -1,14 +1,166 @@
 """Lambda B entrypoint — Trip Assembly.
 
-Routes (implemented in Task 6):
-  POST   /trip/{trip_id}/components
-  DELETE /trip/{trip_id}/components/{component_id}
-  PATCH  /trip/{trip_id}/reorder
-  POST   /trip/{trip_id}/send-to-advisor
-Stateful per-visitor; calls Bedrock; never cached.
+Routes:
+  POST   /trip/{trip_id}/components               add_component
+  DELETE /trip/{trip_id}/components/{component_id} remove_component
+  PATCH  /trip/{trip_id}/reorder                  reorder
+  POST   /trip/{trip_id}/send-to-advisor          sent (+ registration)
+
+Stateful per-visitor; never cached. The framework-agnostic route()
+coroutine takes injectable conn + sender and is unit-tested directly.
+Narration (compose/renarrate) is triggered by the frontend via a separate
+streaming call after the debounce window; these mutation endpoints return
+the updated projection immediately.
 """
 from __future__ import annotations
 
+import json
+import re
+from typing import Any, Optional
 
-def handler(event, context):
-    raise NotImplementedError("Implemented in Task 6")
+from backend import config
+from backend.assembly import events as events_mod
+from backend.assembly import notify as notify_mod
+from backend.assembly import registration as reg_mod
+
+_COMPONENTS_RE = re.compile(r"^/trip/([^/]+)/components$")
+_COMPONENT_ITEM_RE = re.compile(r"^/trip/([^/]+)/components/([^/]+)$")
+_REORDER_RE = re.compile(r"^/trip/([^/]+)/reorder$")
+_SEND_RE = re.compile(r"^/trip/([^/]+)/send-to-advisor$")
+
+_HEADERS = {"content-type": "application/json", "cache-control": "no-store"}
+
+
+def _resp(status: int, body: dict) -> dict:
+    return {"statusCode": status, "headers": _HEADERS, "body": json.dumps(body)}
+
+
+async def route(
+    method: str,
+    path: str,
+    body: dict,
+    *,
+    conn,
+    sender: Optional[notify_mod.Sender] = None,
+) -> dict:
+    sender = sender or notify_mod.LoggingSender()
+
+    m = _COMPONENTS_RE.match(path)
+    if m and method == "POST":
+        trip_id = m.group(1)
+        session_id = body.get("session_id")
+        component_id = body.get("component_id")
+        if not session_id or not component_id:
+            return _resp(400, {"error": "session_id and component_id required"})
+        itinerary = await events_mod.append_event(
+            conn, trip_id, session_id, "add_component",
+            {"component_id": component_id},
+        )
+        return _resp(200, {"trip_id": trip_id, "itinerary": itinerary})
+
+    m = _COMPONENT_ITEM_RE.match(path)
+    if m and method == "DELETE":
+        trip_id, component_id = m.group(1), m.group(2)
+        session_id = body.get("session_id")
+        if not session_id:
+            return _resp(400, {"error": "session_id required"})
+        itinerary = await events_mod.append_event(
+            conn, trip_id, session_id, "remove_component",
+            {"component_id": component_id},
+        )
+        return _resp(200, {"trip_id": trip_id, "itinerary": itinerary})
+
+    m = _REORDER_RE.match(path)
+    if m and method == "PATCH":
+        trip_id = m.group(1)
+        session_id = body.get("session_id")
+        ordered = body.get("ordered_component_ids")
+        if not session_id or not isinstance(ordered, list):
+            return _resp(400, {"error": "session_id and ordered_component_ids required"})
+        itinerary = await events_mod.append_event(
+            conn, trip_id, session_id, "reorder",
+            {"ordered_component_ids": ordered},
+        )
+        return _resp(200, {"trip_id": trip_id, "itinerary": itinerary})
+
+    m = _SEND_RE.match(path)
+    if m and method == "POST":
+        trip_id = m.group(1)
+        session_id = body.get("session_id")
+        if not session_id:
+            return _resp(400, {"error": "session_id required"})
+        customer = body.get("customer") or {}
+        registered = await _is_registered(conn, session_id)
+
+        if config.REQUIRE_REGISTRATION_BEFORE_HANDOFF and not registered:
+            if not (customer.get("name") and (customer.get("phone") or customer.get("email"))):
+                return _resp(
+                    422,
+                    {"error": "registration_required",
+                     "detail": "name and phone or email required before sending"},
+                )
+            await reg_mod.register_and_claim(
+                conn, session_id, customer.get("name", ""),
+                customer.get("phone", ""), customer.get("email", ""),
+            )
+
+        itinerary = await events_mod.append_event(
+            conn, trip_id, session_id, "sent", {"session_id": session_id},
+        )
+        event_log = await _event_log(conn, trip_id)
+        await notify_mod.notify_advisor(trip_id, event_log, sender=sender)
+        return _resp(200, {"trip_id": trip_id, "status": "sent", "itinerary": itinerary})
+
+    return _resp(404, {"error": "not found"})
+
+
+async def _is_registered(conn, session_id: str) -> bool:
+    row = await conn.fetchrow(
+        "SELECT customer_id FROM tripplanner.sessions WHERE id = $1", session_id
+    )
+    return bool(row and row["customer_id"])
+
+
+async def _event_log(conn, trip_id: str) -> list[dict]:
+    rows = await conn.fetch(
+        "SELECT event_type, payload FROM tripplanner.trip_events "
+        "WHERE trip_id = $1 ORDER BY id ASC",
+        trip_id,
+    )
+    out = []
+    for r in rows:
+        payload = r["payload"]
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        out.append({"event_type": r["event_type"], "payload": payload})
+    return out
+
+
+# --- Lambda adapter ---------------------------------------------------------
+
+def _extract_request(event: dict) -> tuple[str, str, dict]:
+    ctx = event.get("requestContext", {})
+    http = ctx.get("http", {})
+    method = http.get("method") or event.get("httpMethod") or "GET"
+    path = http.get("path") or event.get("rawPath") or event.get("path") or "/"
+    raw_body = event.get("body") or "{}"
+    try:
+        body = json.loads(raw_body) if isinstance(raw_body, str) else raw_body
+    except json.JSONDecodeError:
+        body = {}
+    return method, path, body
+
+
+def handler(event, context):  # pragma: no cover - thin AWS adapter
+    import asyncio
+
+    from backend.shared.db import get_pool
+
+    method, path, body = _extract_request(event)
+
+    async def _run():
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            return await route(method, path, body, conn=conn)
+
+    return asyncio.get_event_loop().run_until_complete(_run())
