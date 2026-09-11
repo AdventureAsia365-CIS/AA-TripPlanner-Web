@@ -1,11 +1,11 @@
 # Tasks: AA_TripPlanner_AI (map-first, v0.3)
 
-- [ ] 1. Repo scaffold
+- [x] 1. Repo scaffold
   - Create `frontend/`, `backend/browse/`, `backend/assembly/`,
     `backend/shared/`, `backend/extraction/` per structure.md
   - _Requirements: scaffold only_
 
-- [ ] 2. Database schema
+- [x] 2. Database schema  (SQL written; applying to RDS is human-gated — see docs/smoke-test-runbook.md)
   - Write `migrations/001_tripplanner_schema.sql` (itinerary_components,
     customers, sessions, trip_events, trip_drafts) per design.md
   - Write `migrations/002_shared_destinations.sql` — coordinate table
@@ -13,7 +13,7 @@
     the `shared` schema before applying
   - _Requirements: 1_
 
-- [ ] 3. Extraction pipeline
+- [x] 3. Extraction pipeline  (code + offline tests done; the real 31-tour run is human-gated — needs DB + Mapbox + Bedrock)
   - `backend/extraction/country_normalize.py` — hard-coded map
   - `backend/extraction/geocode.py` — Mapbox Geocoding, cached lookup
     against `shared.destinations`
@@ -24,14 +24,14 @@
   - Run against the real 31 active tours (no mock data step)
   - _Requirements: 1_
 
-- [ ] 4. Bedrock satellite module
+- [x] 4. Bedrock satellite module  (code + stubbed tests done; live call needs IAM trust — human-gated)
   - `backend/shared/bedrock_satellite.py` — STS assume-role (acc3
     primary, acc1 fallback), Bedrock invoke wrapper, streaming support
   - Unit test against a stubbed STS/Bedrock response — no live AWS calls
     in tests
   - _Requirements: 3_
 
-- [ ] 5. Lambda A — Map/Browse
+- [x] 5. Lambda A — Map/Browse
   - `backend/browse/tiles.py` — fixed 1° grid tile query with filter
     support (activity, intensity_level, country, season)
   - `backend/browse/search.py` — pgvector search within pre-filtered set
@@ -39,7 +39,7 @@
     detail, GET search
   - _Requirements: 2_
 
-- [ ] 6. Lambda B — Trip Assembly
+- [x] 6. Lambda B — Trip Assembly
   - `backend/assembly/events.py` — append-only trip_events writer +
     trip_drafts projection updater (single transaction per event)
   - `backend/assembly/sequencing.py` — deterministic nearest-neighbor
@@ -54,7 +54,7 @@
     reorder, send-to-advisor
   - _Requirements: 3, 5, 6_
 
-- [ ] 7. Frontend
+- [x] 7. Frontend
   - `MapView.tsx` — Mapbox, tile-based pins, clustering
   - `FilterChips.tsx` — activity/intensity/season/country, wired to tile
     query params
@@ -67,7 +67,7 @@
     — Lambda URLs never exposed client-side
   - _Requirements: 2, 3, 4, 5, 6_
 
-- [ ] 8. End-to-end smoke test
+- [ ] 8. End-to-end smoke test  (runbook written: docs/smoke-test-runbook.md; the live run is human-gated on DB + Mapbox + Bedrock + deploy)
   - Manual run: browse map -> hover a destination with 2+ components ->
     add one -> confirm trip panel updates immediately -> add a second
     component from a different destination -> confirm compose runs once
