@@ -193,10 +193,13 @@ export default function MapView() {
 
   return (
     <>
-      {/* absolute inset-0 fills the relative parent section reliably —
-          Mapbox needs an explicit-height container; h-full through flex
-          items can resolve to 0 and render a blank map. */}
-      <div ref={containerRef} className="absolute inset-0" />
+      {/* Inline style (not Tailwind) so the map container always has a
+          real, positioned box — independent of any Tailwind
+          purge/config. Mapbox measures this element to size its canvas. */}
+      <div
+        ref={containerRef}
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+      />
       {selected && (
         <DestinationPopup
           destinationId={selected}
