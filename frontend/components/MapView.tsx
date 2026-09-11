@@ -75,6 +75,7 @@ export default function MapView() {
     mapRef.current = map;
 
     map.on("load", () => {
+      map.resize(); // ensure canvas matches container after first layout
       map.addSource(SOURCE_ID, {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -159,7 +160,7 @@ export default function MapView() {
 
   if (!hasMapboxToken()) {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-gray-50 text-center text-gray-500">
+      <div className="absolute inset-0 flex items-center justify-center bg-gray-50 text-center text-gray-500">
         <div>
           <p className="font-medium">Map token not set</p>
           <p className="mt-1 text-sm">
@@ -172,7 +173,10 @@ export default function MapView() {
 
   return (
     <>
-      <div ref={containerRef} className="h-full w-full" />
+      {/* absolute inset-0 fills the relative parent section reliably —
+          Mapbox needs an explicit-height container; h-full through flex
+          items can resolve to 0 and render a blank map. */}
+      <div ref={containerRef} className="absolute inset-0" />
       {selected && (
         <DestinationPopup
           destinationId={selected}
