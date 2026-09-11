@@ -1,0 +1,130 @@
+// Thin client that talks to the BFF routes (never the Lambdas directly).
+import type {
+  BrowseFilters,
+  DestinationDetail,
+  DestinationPin,
+  ItineraryDay,
+} from "./types";
+
+function filterParams(f: BrowseFilters): string {
+  const p = new URLSearchParams();
+  if (f.activity) p.set("activity", f.activity);
+  if (f.intensity_level) p.set("intensity_level", f.intensity_level);
+  if (f.country) p.set("country", f.country);
+  if (f.season) p.set("season", String(f.season));
+  return p.toString();
+}
+
+export async function fetchTile(
+  tileId: string,
+  filters: BrowseFilters,
+): Promise<DestinationPin[]> {
+  const qs = filterParams(filters);
+  const res = await fetch(
+    `/api/browse?resource=tiles&tile_id=${encodeURIComponent(tileId)}&${qs}`,
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.destinations ?? [];
+}
+
+export async function fetchDestination(
+  id: string,
+): Promise<DestinationDetail | null> {
+  const res = await fetch(
+    `/api/browse?resource=destination&id=${encodeURIComponent(id)}`,
+  );
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function search(
+  q: string,
+  filters: BrowseFilters,
+): Promise<DestinationPin[]> {
+  const qs = filterParams(filters);
+  const res = await fetch(
+    `/api/browse?resource=search&q=${encodeURIComponent(q)}&${qs}`,
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.destinations ?? [];
+}
+
+interface TripResponse {
+  trip_id: string;
+  itinerary: ItineraryDay[];
+  status?: string;
+}
+
+export async function addComponent(
+  tripId: string,
+  sessionId: string,
+  componentId: string,
+): Promise<TripResponse> {
+  const res = await fetch("/api/trip", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      op: "add",
+      trip_id: tripId,
+      session_id: sessionId,
+      component_id: componentId,
+    }),
+  });
+  return res.json();
+}
+
+export async function removeComponent(
+  tripId: string,
+  sessionId: string,
+  componentId: string,
+): Promise<TripResponse> {
+  const res = await fetch("/api/trip", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      op: "remove",
+      trip_id: tripId,
+      session_id: sessionId,
+      component_id: componentId,
+    }),
+  });
+  return res.json();
+}
+
+export async function reorder(
+  tripId: string,
+  sessionId: string,
+  orderedComponentIds: string[],
+): Promise<TripResponse> {
+  const res = await fetch("/api/trip", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      op: "reorder",
+      trip_id: tripId,
+      session_id: sessionId,
+      ordered_component_ids: orderedComponentIds,
+    }),
+  });
+  return res.json();
+}
+
+export async function sendToAdvisor(
+  tripId: string,
+  sessionId: string,
+  customer?: { name: string; phone: string; email: string },
+): Promise<{ status: number; body: TripResponse & { error?: string } }> {
+  const res = await fetch("/api/trip", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      op: "send",
+      trip_id: tripId,
+      session_id: sessionId,
+      customer,
+    }),
+  });
+  return { status: res.status, body: await res.json() };
+}
