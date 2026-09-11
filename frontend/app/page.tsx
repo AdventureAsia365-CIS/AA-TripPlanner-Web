@@ -8,12 +8,21 @@ import { TripProvider } from "@/lib/useTrip";
 export default function Home() {
   return (
     <TripProvider>
-      <main className="flex h-screen max-h-screen w-screen overflow-hidden">
-        <section className="relative h-screen flex-1">
+      {/* Inline heights so the layout box exists regardless of Tailwind
+          class generation — the map's absolute container needs a sized,
+          positioned ancestor. */}
+      <main
+        className="overflow-hidden"
+        style={{ display: "flex", height: "100vh", width: "100vw" }}
+      >
+        <section style={{ position: "relative", flex: 1, height: "100vh" }}>
           <FilterChips />
           <MapView />
         </section>
-        <aside className="h-screen w-96 shrink-0 overflow-y-auto border-l border-gray-200 bg-gray-50">
+        <aside
+          className="border-l border-gray-200 bg-gray-50"
+          style={{ height: "100vh", width: "24rem", flexShrink: 0, overflowY: "auto" }}
+        >
           <TripPanel />
         </aside>
       </main>
