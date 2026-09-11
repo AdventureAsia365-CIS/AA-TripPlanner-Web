@@ -1,0 +1,66 @@
+"""Central configuration for the AA-TripPlanner backend.
+
+All environment-driven values live here so nothing is hardcoded inline
+across modules. In production the DB connection string comes from AWS
+Secrets Manager (acc2); locally it comes from the environment / .env.
+"""
+from __future__ import annotations
+
+import os
+
+
+def _get(name: str, default: str | None = None, required: bool = False) -> str | None:
+    val = os.environ.get(name, default)
+    if required and not val:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return val
+
+
+# --- Database (shared RDS instance, acc2, us-west-1) ---
+# Full DSN, e.g. postgresql://user:pass@host:5432/dbname
+DATABASE_URL = _get("TRIPPLANNER_DATABASE_URL")
+
+# Schemas this service touches. tripplanner is owned; shared is the one
+# deliberate cross-program exception (shared.destinations only).
+SCHEMA_TRIPPLANNER = "tripplanner"
+SCHEMA_SHARED = "shared"
+
+# Source schemas the extraction pipeline READS (never writes).
+SCHEMA_GOLD = "gold_aa_internal"
+SCHEMA_ACP = "acp_contract"
+
+# --- Mapbox ---
+MAPBOX_GEOCODING_TOKEN = _get("MAPBOX_GEOCODING_TOKEN")
+MAPBOX_GEOCODING_URL = "https://api.mapbox.com/geocoding/v5/mapbox.places"
+
+# --- Bedrock satellite (acc3 primary, acc1 fallback) ---
+BEDROCK_ACCT_PRIMARY = _get("BEDROCK_ACCT_PRIMARY", "786888028788")
+BEDROCK_ACCT_FALLBACK = _get("BEDROCK_ACCT_FALLBACK", "867490540162")
+BEDROCK_ROLE_NAME = _get("BEDROCK_ROLE_NAME", "")  # cross-account role to assume
+BEDROCK_REGION = _get("BEDROCK_REGION", "us-west-2")
+# Sonnet-tier model for both compose and renarrate (no Haiku parse step).
+BEDROCK_MODEL_COMPOSE = _get(
+    "BEDROCK_MODEL_COMPOSE", "anthropic.claude-3-5-sonnet-20241022-v2:0"
+)
+# Embedding model for itinerary_components.embedding (VECTOR(1536)).
+BEDROCK_MODEL_EMBED = _get(
+    "BEDROCK_MODEL_EMBED", "amazon.titan-embed-text-v2:0"
+)
+EMBED_DIM = 1536
+
+# --- Advisor notification (single config value, never inline) ---
+ADVISOR_NOTIFY_EMAIL = _get("ADVISOR_NOTIFY_EMAIL", "pqnghiep1354@gmail.com")
+
+# --- Behavioural constants (from design.md non-functional table) ---
+HOVER_DEBOUNCE_MS = 200
+SEARCH_DEBOUNCE_MS = 400
+COMPOSE_DEBOUNCE_S = 2.5
+CDN_TTL_SECONDS = 30 * 60
+TILE_DEGREES = 1.0
+LONG_TRIP_WARN_DAYS = 25
+GUEST_SESSION_DAYS = 90
+
+# Feature flag: require registration before send-to-advisor.
+REQUIRE_REGISTRATION_BEFORE_HANDOFF = (
+    _get("REQUIRE_REGISTRATION_BEFORE_HANDOFF", "true").lower() == "true"
+)
