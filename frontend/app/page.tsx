@@ -8,12 +8,12 @@ import { TripProvider } from "@/lib/useTrip";
 export default function Home() {
   return (
     <TripProvider>
-      <main className="flex h-screen w-screen overflow-hidden">
-        <section className="relative flex-1">
+      <main className="flex h-screen max-h-screen w-screen overflow-hidden">
+        <section className="relative h-screen flex-1">
           <FilterChips />
           <MapView />
         </section>
-        <aside className="w-96 shrink-0 border-l border-gray-200 bg-gray-50">
+        <aside className="h-screen w-96 shrink-0 overflow-y-auto border-l border-gray-200 bg-gray-50">
           <TripPanel />
         </aside>
       </main>
