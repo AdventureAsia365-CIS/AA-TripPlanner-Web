@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 // BFF proxy to Lambda B (Trip Assembly). Keeps TRIP_API_URL server-side.
 // Maps a single { op } POST body onto the Lambda's REST verbs/paths.
 const TRIP_API_URL = process.env.TRIP_API_URL ?? "";
+// Shared secret the Lambdas verify (X-TripPlanner-Key). Server-side only.
+const TRIPPLANNER_API_KEY = process.env.TRIPPLANNER_API_KEY ?? "";
 
 export async function POST(req: NextRequest) {
   if (!TRIP_API_URL) {
@@ -47,9 +49,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "unknown op" }, { status: 400 });
   }
 
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (TRIPPLANNER_API_KEY) headers["x-tripplanner-key"] = TRIPPLANNER_API_KEY;
+
   const upstream = await fetch(`${TRIP_API_URL}${path}`, {
     method,
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(payload),
   });
   const text = await upstream.text();

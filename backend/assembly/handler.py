@@ -195,7 +195,12 @@ def _extract_request(event: dict) -> tuple[str, str, dict]:
 def handler(event, context):  # pragma: no cover - thin AWS adapter
     import asyncio
 
+    from backend.shared import auth
     from backend.shared.db import get_pool
+
+    denied = auth.check_event(event)
+    if denied is not None:
+        return denied
 
     method, path, body = _extract_request(event)
 

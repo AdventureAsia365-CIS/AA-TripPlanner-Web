@@ -68,6 +68,14 @@ EMBED_DIM = 1536
 # --- Advisor notification (single config value, never inline) ---
 ADVISOR_NOTIFY_EMAIL = _get("ADVISOR_NOTIFY_EMAIL", "pqnghiep1354@gmail.com")
 
+# --- Edge shared-secret (API Gateway auth is NONE; the app checks this) ---
+# A shared secret the BFF must send in the X-TripPlanner-Key header. When
+# unset/empty (local dev, unit tests) the check is DISABLED — so nothing
+# breaks without it. In production the Lambda env sets it from Secrets
+# Manager and the BFF sends the same value. See shared/auth.py.
+TRIPPLANNER_API_KEY = _get("TRIPPLANNER_API_KEY", "")
+API_KEY_HEADER = "x-tripplanner-key"
+
 # --- Behavioural constants (from design.md non-functional table) ---
 HOVER_DEBOUNCE_MS = 200
 SEARCH_DEBOUNCE_MS = 400
