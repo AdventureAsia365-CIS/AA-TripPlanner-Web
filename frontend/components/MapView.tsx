@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { fetchTile } from "@/lib/api";
-import { hasMapboxToken, MAPBOX_TOKEN, tileIdFor } from "@/lib/mapbox";
+import { fetchRoute, hasMapboxToken, MAPBOX_TOKEN, tileIdFor } from "@/lib/mapbox";
 import type { DestinationPin } from "@/lib/types";
 import { useTrip } from "@/lib/useTrip";
 import DestinationPopup from "./DestinationPopup";
@@ -162,16 +162,24 @@ export default function MapView() {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
       });
+      // A soft white casing under a solid gold line reads cleanly over the
+      // map (like a highlighted route).
+      map.addLayer({
+        id: "trip-line-casing",
+        type: "line",
+        source: TRIP_LINE_SOURCE,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#ffffff", "line-width": 7, "line-opacity": 0.9 },
+      });
       map.addLayer({
         id: "trip-line",
         type: "line",
         source: TRIP_LINE_SOURCE,
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#B87A1A",
-          "line-width": 3,
-          "line-dasharray": [1.5, 1.2],
-          "line-opacity": 0.9,
+          "line-color": "#DB9628",
+          "line-width": 4,
+          "line-opacity": 0.95,
         },
       });
       map.addLayer({
@@ -287,16 +295,41 @@ export default function MapView() {
 
     // A line needs at least 2 distinct points; dedupe consecutive identical
     // coords (several components can share one destination's coordinate).
-    const lineCoords = pts.map((p) => p.coord).filter(
+    const straight = pts.map((p) => p.coord).filter(
       (c, i, arr) => i === 0 || c[0] !== arr[i - 1][0] || c[1] !== arr[i - 1][1],
     );
-    lineSrc.setData({
-      type: "FeatureCollection",
-      features:
-        lineCoords.length >= 2
-          ? [{ type: "Feature", geometry: { type: "LineString", coordinates: lineCoords }, properties: {} }]
-          : [],
+
+    const setLine = (coords: [number, number][]) =>
+      lineSrc.setData({
+        type: "FeatureCollection",
+        features:
+          coords.length >= 2
+            ? [{ type: "Feature", geometry: { type: "LineString", coordinates: coords }, properties: {} }]
+            : [],
+      });
+
+    // Draw the straight path immediately (instant feedback), then upgrade to
+    // a real road-following route from Mapbox Directions when it resolves.
+    // Falls back to the straight line if Directions fails (e.g. points not
+    // connected by road — islands/cross-water).
+    setLine(straight);
+    if (straight.length < 2) return;
+
+    let cancelled = false;
+    fetchRoute(straight).then((route) => {
+      if (cancelled) return;
+      const src = map.getSource(TRIP_LINE_SOURCE) as mapboxgl.GeoJSONSource | undefined;
+      if (!src) return;
+      if (route && route.length >= 2) {
+        src.setData({
+          type: "FeatureCollection",
+          features: [{ type: "Feature", geometry: { type: "LineString", coordinates: route }, properties: {} }],
+        });
+      }
     });
+    return () => {
+      cancelled = true;
+    };
   }, [itinerary]);
 
   if (!hasMapboxToken()) {

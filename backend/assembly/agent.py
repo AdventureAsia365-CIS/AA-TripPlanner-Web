@@ -46,7 +46,10 @@ def _build_body(system: str, itinerary: list[dict]) -> dict:
     user = (
         "Itinerary (fixed order):\n"
         + "\n".join(day_lines)
-        + "\n\nWrite one or two sentences of narration per day, in order."
+        + "\n\nWrite one or two warm sentences of narration per day, in order.\n"
+        "Format STRICTLY as one line per day, beginning with 'Day N: ' "
+        "(e.g. 'Day 1: ...'). Plain text only — no markdown, no bold, no "
+        "asterisks, no headings, no blank lines between days."
     )
     return {
         "anthropic_version": "bedrock-2023-05-31",
