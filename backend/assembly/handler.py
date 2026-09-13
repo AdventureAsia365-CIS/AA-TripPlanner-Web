@@ -32,7 +32,9 @@ _HEADERS = {"content-type": "application/json", "cache-control": "no-store"}
 
 
 def _resp(status: int, body: dict) -> dict:
-    return {"statusCode": status, "headers": _HEADERS, "body": json.dumps(body)}
+    # default=str so asyncpg-returned UUID/date/datetime values in the
+    # itinerary projection serialize cleanly (they're not JSON-native).
+    return {"statusCode": status, "headers": _HEADERS, "body": json.dumps(body, default=str)}
 
 
 async def route(
