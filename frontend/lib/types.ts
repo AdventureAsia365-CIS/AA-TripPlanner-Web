@@ -31,6 +31,10 @@ export interface ItineraryDay {
   component_id: string;
   name: string | null;
   rationale: string | null;
+  // Present in the assembly API response (from the destination row); used to
+  // draw the day-order path on the map. Optional so older callers still typecheck.
+  lat?: number;
+  lng?: number;
 }
 
 export interface BrowseFilters {
