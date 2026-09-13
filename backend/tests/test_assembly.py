@@ -224,15 +224,17 @@ async def test_notify_uses_config_email():
 
 # --- agent (compose / renarrate) --------------------------------------------
 
-def _fake_stream_invoker(_model, _body):
-    # emulate Claude streaming chunks
-    for t in ["Day 1 narration. ", "Day 2 narration."]:
-        yield {"delta": {"type": "text_delta", "text": t}}
+def _fake_invoker(_model, _body):
+    # emulate a buffered Claude messages response
+    return {"content": [
+        {"type": "text", "text": "Day 1 narration. "},
+        {"type": "text", "text": "Day 2 narration."},
+    ]}
 
 
-def test_compose_streams_text():
+def test_compose_returns_text():
     itinerary = [{"day": 1, "name": "Hanoi", "text_extract": "x"}]
-    out = "".join(agent.compose(itinerary, invoker=_fake_stream_invoker))
+    out = "".join(agent.compose(itinerary, invoker=_fake_invoker))
     assert "Day 1 narration." in out
 
 
@@ -243,7 +245,7 @@ def test_renarrate_preserves_given_order_in_prompt():
 
     def capture_invoker(model, body):
         captured["body"] = body
-        return iter([])
+        return {"content": []}
 
     itinerary = [
         {"day": 1, "name": "Hoi An", "text_extract": "a"},
