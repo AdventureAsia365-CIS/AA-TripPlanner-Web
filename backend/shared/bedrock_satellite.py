@@ -1,20 +1,26 @@
-"""Bedrock satellite: cross-account STS assume-role + Bedrock invoke.
+"""Bedrock access — hybrid, verified live against the real accounts.
 
-Reimplemented fresh here (NOT imported from AA-CIS-App) per tech.md — it
-is a small, well-understood pattern: assume a cross-account role that is
-trusted to call Bedrock, then invoke the model with those temporary
-credentials.
+Two paths, because acc2 (005097885195, where the Lambdas run) is an AWS
+channel-program account that CANNOT invoke Anthropic Claude:
 
-Account strategy: try the primary account (acc3, 786888028788) first;
-if assuming its role fails (auth/permission/availability), fall back to
-acc1 (867490540162). Both roles are added as trusted principals via
-Terraform in AA-CIS-Infra (human-applied) — this module does not create
-any trust; it only consumes it.
+  compose / renarrate (Claude)  -> SATELLITE: assume a cross-account role
+      (acc3 786888028788 primary, acc1 867490540162 fallback) that is
+      trusted to call Bedrock, then invoke with those temp creds. Each
+      account uses its own ExternalId (config). Trust is added via
+      Terraform in AA-CIS-Infra (human-applied); this module only consumes.
+
+  embed (Cohere Embed v4)       -> DIRECT: acc2 CAN invoke Cohere
+      embeddings, so no assume-role — the Lambda's own execution role is
+      granted bedrock:InvokeModel on the Cohere inference profile.
+
+All models are addressed by inference-profile id (e.g.
+us.anthropic.claude-sonnet-4-6, us.cohere.embed-v4:0); bare foundation-
+model ids fail with ValidationException.
 
 Testability: all AWS access goes through an injectable client factory
-(`ClientFactory`). Unit tests pass a stub factory so no live AWS call is
-made. Nothing here reads AWS access keys — credentials come from the
-Lambda execution role's ambient chain (IAM role only).
+(`ClientFactory`); unit tests pass a stub so no live AWS call is made and
+boto3 need not be installed. Nothing reads AWS keys — creds come from the
+Lambda role's ambient chain (IAM role only).
 """
 from __future__ import annotations
 
@@ -30,7 +36,7 @@ class BedrockError(RuntimeError):
 
 
 class _StsClient(Protocol):
-    def assume_role(self, *, RoleArn: str, RoleSessionName: str) -> dict: ...
+    def assume_role(self, **kwargs: Any) -> dict: ...
 
 
 class _BedrockClient(Protocol):
@@ -85,17 +91,22 @@ def _role_arn(account_id: str) -> str:
     return f"arn:aws:iam::{account_id}:role/{role}"
 
 
-def _assume(account_id: str, client_factory: ClientFactory) -> Credentials:
+def _assume(account_id: str, external_id: str, client_factory: ClientFactory) -> Credentials:
     sts: _StsClient = client_factory("sts")
-    resp = sts.assume_role(
-        RoleArn=_role_arn(account_id),
-        RoleSessionName="tripplanner-bedrock",
-    )
+    kwargs: dict[str, Any] = {
+        "RoleArn": _role_arn(account_id),
+        "RoleSessionName": "tripplanner-bedrock",
+    }
+    if external_id:
+        kwargs["ExternalId"] = external_id
+    resp = sts.assume_role(**kwargs)
     return Credentials.from_sts_response(resp)
 
 
-def _bedrock_for_account(account_id: str, client_factory: ClientFactory) -> _BedrockClient:
-    creds = _assume(account_id, client_factory)
+def _bedrock_for_account(
+    account_id: str, external_id: str, client_factory: ClientFactory
+) -> _BedrockClient:
+    creds = _assume(account_id, external_id, client_factory)
     return client_factory("bedrock-runtime", creds=creds, region=config.BEDROCK_REGION)
 
 
@@ -103,18 +114,23 @@ def _with_failover(
     op: Callable[[_BedrockClient], Any],
     client_factory: ClientFactory,
 ) -> Any:
-    """Run `op` against primary account; on failure, retry against fallback."""
-    accounts = [config.BEDROCK_ACCT_PRIMARY, config.BEDROCK_ACCT_FALLBACK]
+    """Run `op` against acc3 (primary); on failure, retry against acc1
+    (fallback). Each account has its own ExternalId (see config)."""
+    attempts = [
+        (config.BEDROCK_ACCT_PRIMARY, config.BEDROCK_EXTERNAL_ID_PRIMARY),
+        (config.BEDROCK_ACCT_FALLBACK, config.BEDROCK_EXTERNAL_ID_FALLBACK),
+    ]
     last_err: Optional[Exception] = None
-    for acct in accounts:
+    for acct, ext_id in attempts:
         try:
-            client = _bedrock_for_account(acct, client_factory)
+            client = _bedrock_for_account(acct, ext_id, client_factory)
             return op(client)
         except Exception as e:  # noqa: BLE001 — deliberately broad, we failover
             last_err = e
             continue
     raise BedrockError(
-        f"Bedrock invoke failed on both {accounts[0]} and {accounts[1]}: {last_err}"
+        f"Bedrock invoke failed on both {attempts[0][0]} and "
+        f"{attempts[1][0]}: {last_err}"
     ) from last_err
 
 
@@ -163,16 +179,43 @@ def invoke_stream(
         yield chunk
 
 
+def _extract_cohere_embedding(resp: dict) -> list[float]:
+    """Pull the first embedding vector out of a Cohere Embed v4 response.
+
+    Response shape (verified live): {"embeddings": {"float": [[...]]}, ...}
+    Older/other shapes use {"embeddings": [[...]]}; handle both.
+    """
+    emb = resp.get("embeddings")
+    if isinstance(emb, dict):
+        emb = emb.get("float") or emb.get("embeddings")
+    if isinstance(emb, list) and emb and isinstance(emb[0], list):
+        return [float(x) for x in emb[0]]
+    raise BedrockError(f"Unexpected embedding response shape: {list(resp)[:6]}")
+
+
 def embed(
     text: str,
     *,
     model_id: Optional[str] = None,
     client_factory: ClientFactory = _default_client_factory,
+    input_type: str = "search_document",
 ) -> list[float]:
-    """Return an embedding vector for `text` (Titan-style response shape)."""
+    """Return an embedding vector for `text` via a DIRECT acc2 Bedrock call.
+
+    Unlike compose/renarrate (Claude, satellite), embeddings run on acc2
+    itself — acc2 can invoke Cohere Embed v4 even though it can't invoke
+    Claude. No assume-role here: the Lambda's own execution role is granted
+    bedrock:InvokeModel on the Cohere inference profile.
+    """
     model = model_id or config.BEDROCK_MODEL_EMBED
-    resp = invoke(model, {"inputText": text}, client_factory=client_factory)
-    vec = resp.get("embedding")
-    if not isinstance(vec, list):
-        raise BedrockError(f"Unexpected embedding response shape: {list(resp)[:5]}")
+    body = {"texts": [text], "input_type": input_type}
+    client = client_factory("bedrock-runtime", region=config.BEDROCK_REGION)
+    resp_raw = client.invoke_model(modelId=model, body=json.dumps(body))
+    raw = resp_raw["body"].read() if hasattr(resp_raw["body"], "read") else resp_raw["body"]
+    resp = json.loads(raw)
+    vec = _extract_cohere_embedding(resp)
+    if len(vec) != config.EMBED_DIM:
+        raise BedrockError(
+            f"Embedding dim {len(vec)} != expected {config.EMBED_DIM}"
+        )
     return vec

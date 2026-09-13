@@ -33,19 +33,29 @@ SCHEMA_ACP = "acp_contract"
 MAPBOX_GEOCODING_TOKEN = _get("MAPBOX_GEOCODING_TOKEN")
 MAPBOX_GEOCODING_URL = "https://api.mapbox.com/geocoding/v5/mapbox.places"
 
-# --- Bedrock satellite (acc3 primary, acc1 fallback) ---
-BEDROCK_ACCT_PRIMARY = _get("BEDROCK_ACCT_PRIMARY", "786888028788")
-BEDROCK_ACCT_FALLBACK = _get("BEDROCK_ACCT_FALLBACK", "867490540162")
+# --- Bedrock ---
+# Region for all Bedrock calls. Verified live: acc2/acc3/acc1 all us-west-1.
+BEDROCK_REGION = _get("BEDROCK_REGION", "us-west-1")
+
+# LLM (compose/renarrate) — Claude via the satellite pattern. acc2
+# (005097885195) is a channel-program account and CANNOT invoke Claude
+# ("Access to this model is not available for channel program accounts"),
+# so the app assumes a cross-account role: acc3 primary, acc1 fallback —
+# same as AA-CIS-App/ACPv2. Verified live on acc1: us.anthropic.claude-
+# sonnet-4-6 invokes OK. Models MUST be called by inference-profile id
+# (the bare foundation-model id fails with ValidationException).
+BEDROCK_ACCT_PRIMARY = _get("BEDROCK_ACCT_PRIMARY", "786888028788")   # acc3
+BEDROCK_ACCT_FALLBACK = _get("BEDROCK_ACCT_FALLBACK", "867490540162")  # acc1
 BEDROCK_ROLE_NAME = _get("BEDROCK_ROLE_NAME", "")  # cross-account role to assume
-BEDROCK_REGION = _get("BEDROCK_REGION", "us-west-2")
-# Sonnet-tier model for both compose and renarrate (no Haiku parse step).
-BEDROCK_MODEL_COMPOSE = _get(
-    "BEDROCK_MODEL_COMPOSE", "anthropic.claude-3-5-sonnet-20241022-v2:0"
-)
-# Embedding model for itinerary_components.embedding (VECTOR(1536)).
-BEDROCK_MODEL_EMBED = _get(
-    "BEDROCK_MODEL_EMBED", "amazon.titan-embed-text-v2:0"
-)
+BEDROCK_EXTERNAL_ID_PRIMARY = _get("BEDROCK_EXTERNAL_ID_PRIMARY", "aa296-satellite-bedrock-acc3")
+BEDROCK_EXTERNAL_ID_FALLBACK = _get("BEDROCK_EXTERNAL_ID_FALLBACK", "aa296-satellite-bedrock")
+BEDROCK_MODEL_COMPOSE = _get("BEDROCK_MODEL_COMPOSE", "us.anthropic.claude-sonnet-4-6")
+
+# Embedding — Cohere Embed v4 via a DIRECT Bedrock call on acc2 (no
+# satellite: acc2 CAN invoke Cohere embeddings). Verified live:
+# us.cohere.embed-v4:0 returns 1536-dim vectors (matches VECTOR(1536)).
+# Called by inference-profile id (bare id fails on-demand).
+BEDROCK_MODEL_EMBED = _get("BEDROCK_MODEL_EMBED", "us.cohere.embed-v4:0")
 EMBED_DIM = 1536
 
 # --- Advisor notification (single config value, never inline) ---

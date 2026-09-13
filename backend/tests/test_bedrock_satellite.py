@@ -24,7 +24,7 @@ class StubSts:
     def __init__(self, account_seen: list):
         self._seen = account_seen
 
-    def assume_role(self, *, RoleArn, RoleSessionName):
+    def assume_role(self, *, RoleArn, RoleSessionName, ExternalId=None):
         # Record which account's role was assumed.
         acct = RoleArn.split(":")[4]
         self._seen.append(acct)
@@ -68,14 +68,20 @@ class StubBedrock:
 
 
 def make_factory(*, primary_bedrock: StubBedrock, fallback_bedrock: StubBedrock,
-                 account_seen: list, primary="111111111111"):
+                 account_seen: list, primary="111111111111",
+                 direct_bedrock: StubBedrock | None = None):
     """Return a ClientFactory that routes bedrock clients by which account's
-    STS creds were used (encoded in the access key id)."""
+    STS creds were used (encoded in the access key id). A bedrock-runtime
+    client requested with NO creds (the direct embed path) returns
+    `direct_bedrock`."""
 
     def factory(service, *, creds=None, region=None):
         if service == "sts":
             return StubSts(account_seen)
         if service == "bedrock-runtime":
+            if creds is None:
+                assert direct_bedrock is not None, "direct embed call unexpected"
+                return direct_bedrock
             acct = creds.access_key_id.split("-")[1]
             return primary_bedrock if acct == primary else fallback_bedrock
         raise AssertionError(f"unexpected service {service}")
@@ -135,15 +141,23 @@ def test_invoke_stream_yields_chunks():
     assert got == chunks
 
 
-def test_embed_returns_vector():
+def test_embed_returns_vector_direct_no_assume_role(monkeypatch):
+    # embed() is a DIRECT acc2 call (no assume-role) using the Cohere v4
+    # response shape {"embeddings": {"float": [[...]]}}. Set EMBED_DIM to
+    # match the stub vector length.
+    monkeypatch.setattr(config, "EMBED_DIM", 3)
     seen: list = []
+    cohere = StubBedrock(response={"embeddings": {"float": [[0.1, 0.2, 0.3]]}})
     factory = make_factory(
-        primary_bedrock=StubBedrock(response={"embedding": [0.1, 0.2, 0.3]}),
+        primary_bedrock=StubBedrock(fail=True),
         fallback_bedrock=StubBedrock(fail=True),
         account_seen=seen,
+        direct_bedrock=cohere,
     )
     vec = bs.embed("some text", client_factory=factory)
     assert vec == [0.1, 0.2, 0.3]
+    # No STS assume-role happened for embeddings.
+    assert seen == []
 
 
 def test_missing_role_raises(monkeypatch):
