@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTrip } from "@/lib/useTrip";
 import { ACTIVITIES, INTENSITIES } from "@/lib/types";
 
@@ -8,6 +8,8 @@ const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
+
+const SEARCH_DEBOUNCE_MS = 400;
 
 function label(v: string): string {
   return v.replace(/_/g, " ");
@@ -26,8 +28,29 @@ const ACTIVITY_ICON: Record<string, string> = {
 };
 
 export default function FilterChips() {
-  const { filters, setFilters } = useTrip();
+  const {
+    filters,
+    setFilters,
+    runSearch,
+    clearSearch,
+    searching,
+    searchResults,
+  } = useTrip();
   const [open, setOpen] = useState(true);
+  const [text, setText] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Debounced semantic search. Empty text clears search (back to browse mode).
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      if (text.trim()) runSearch(text);
+      else clearSearch();
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [text, runSearch, clearSearch]);
 
   const toggleActivity = (a: string) =>
     setFilters({ ...filters, activity: filters.activity === a ? undefined : a });
@@ -38,29 +61,44 @@ export default function FilterChips() {
     (filters.season ? 1 : 0) +
     (filters.country ? 1 : 0);
 
+  const resultCount = searchResults?.length ?? null;
+
   return (
     <div className="pointer-events-none absolute left-4 right-4 top-4 z-10 flex justify-start">
       <div className="pointer-events-auto w-full max-w-2xl rounded-2xl border border-aa-line bg-white/95 shadow-aa backdrop-blur">
         {/* Search + toggle row */}
         <div className="flex items-center gap-2 px-3 py-2.5">
           <span className="flex h-9 flex-1 items-center gap-2 rounded-xl border border-aa-line bg-aa-sand px-3">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="text-aa-muted">
-              <path
-                d="M21 21l-4.3-4.3M11 19a8 8 0 100-16 8 8 0 000 16z"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-            </svg>
+            {searching ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" className="animate-spin text-aa-gold">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" fill="none" strokeDasharray="42" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="text-aa-muted">
+                <path
+                  d="M21 21l-4.3-4.3M11 19a8 8 0 100-16 8 8 0 000 16z"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            )}
             <input
-              aria-label="Search by country"
-              placeholder="Search a country — e.g. Nepal, Vietnam, Japan"
-              value={filters.country ?? ""}
-              onChange={(e) =>
-                setFilters({ ...filters, country: e.target.value || undefined })
-              }
+              aria-label="Search experiences"
+              placeholder="Search experiences — e.g. sunrise trek, street food, temples"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
               className="aa-focus w-full bg-transparent text-sm text-aa-ink placeholder:text-aa-muted focus:outline-none"
             />
+            {text && (
+              <button
+                onClick={() => setText("")}
+                aria-label="Clear search"
+                className="aa-focus rounded p-0.5 text-aa-muted hover:text-aa-ink"
+              >
+                ✕
+              </button>
+            )}
           </span>
           <button
             onClick={() => setOpen((o) => !o)}
@@ -75,6 +113,23 @@ export default function FilterChips() {
             )}
           </button>
         </div>
+
+        {/* Search result banner */}
+        {resultCount !== null && (
+          <div className="flex items-center justify-between border-t border-aa-line bg-aa-gold-soft px-3 py-1.5 text-xs text-aa-gold-dark">
+            <span>
+              {resultCount === 0
+                ? "No matches — try different words or clear a filter."
+                : `${resultCount} place${resultCount > 1 ? "s" : ""} match “${text.trim()}”, best first.`}
+            </span>
+            <button
+              onClick={() => setText("")}
+              className="aa-focus font-semibold underline-offset-2 hover:underline"
+            >
+              Back to map
+            </button>
+          </div>
+        )}
 
         {open && (
           <div className="aa-animate-in border-t border-aa-line px-3 py-3">
@@ -136,6 +191,16 @@ export default function FilterChips() {
                   </option>
                 ))}
               </select>
+
+              <input
+                aria-label="Country"
+                placeholder="Country"
+                value={filters.country ?? ""}
+                onChange={(e) =>
+                  setFilters({ ...filters, country: e.target.value || undefined })
+                }
+                className="aa-focus w-28 rounded-lg border border-aa-line bg-white px-2.5 py-1.5 text-xs text-aa-ink placeholder:text-aa-muted"
+              />
 
               {activeCount > 0 && (
                 <button
