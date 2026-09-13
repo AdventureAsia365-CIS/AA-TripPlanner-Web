@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any, Optional, Protocol
 
+from backend import config
 from backend.assembly import sequencing
 
 VALID_EVENTS = {"add_component", "remove_component", "reorder", "sent"}
@@ -103,6 +104,26 @@ async def _latest_explicit_order(conn: _Conn, trip_id: str) -> Optional[list[str
     return payload.get("ordered_component_ids")
 
 
+async def _ensure_guest_session(conn: _Conn, session_id: str) -> None:
+    """Guarantee a sessions row exists for session_id before any event that
+    FK-references it. The app has no separate 'create session' call — the
+    first pin (add_component) from a fresh visitor lazily creates an
+    anonymous GUEST session (guest_token = the session id, 90-day expiry).
+    Registration later attaches a customer_id and clears the expiry
+    (registration.py). Idempotent: a no-op if the session already exists,
+    and never resets a registered session's expiry.
+    """
+    await conn.execute(
+        """
+        INSERT INTO tripplanner.sessions (id, guest_token, expires_at)
+        VALUES ($1, $1::text, now() + ($2 || ' days')::interval)
+        ON CONFLICT (id) DO NOTHING
+        """,
+        session_id,
+        str(config.GUEST_SESSION_DAYS),
+    )
+
+
 async def append_event(
     conn: _Conn,
     trip_id: str,
@@ -116,6 +137,7 @@ async def append_event(
         raise ValueError(f"invalid event_type: {event_type}")
 
     async with conn.transaction():
+        await _ensure_guest_session(conn, session_id)
         await conn.execute(
             "INSERT INTO tripplanner.trip_events "
             "(trip_id, session_id, event_type, payload) "
