@@ -81,20 +81,22 @@ def _default_client_factory(service: str, *, creds: Optional[Credentials] = None
     return boto3.client(service, **kwargs)
 
 
-def _role_arn(account_id: str) -> str:
-    role = config.BEDROCK_ROLE_NAME
+def _role_arn(account_id: str, role_name: str) -> str:
+    role = role_name or config.BEDROCK_ROLE_NAME
     if not role:
         raise BedrockError(
-            "BEDROCK_ROLE_NAME is not configured — cannot assume a "
-            "cross-account Bedrock role."
+            "No satellite role name configured for account "
+            f"{account_id} — cannot assume a cross-account Bedrock role."
         )
     return f"arn:aws:iam::{account_id}:role/{role}"
 
 
-def _assume(account_id: str, external_id: str, client_factory: ClientFactory) -> Credentials:
+def _assume(
+    account_id: str, role_name: str, external_id: str, client_factory: ClientFactory
+) -> Credentials:
     sts: _StsClient = client_factory("sts")
     kwargs: dict[str, Any] = {
-        "RoleArn": _role_arn(account_id),
+        "RoleArn": _role_arn(account_id, role_name),
         "RoleSessionName": "tripplanner-bedrock",
     }
     if external_id:
@@ -104,9 +106,9 @@ def _assume(account_id: str, external_id: str, client_factory: ClientFactory) ->
 
 
 def _bedrock_for_account(
-    account_id: str, external_id: str, client_factory: ClientFactory
+    account_id: str, role_name: str, external_id: str, client_factory: ClientFactory
 ) -> _BedrockClient:
-    creds = _assume(account_id, external_id, client_factory)
+    creds = _assume(account_id, role_name, external_id, client_factory)
     return client_factory("bedrock-runtime", creds=creds, region=config.BEDROCK_REGION)
 
 
@@ -117,13 +119,21 @@ def _with_failover(
     """Run `op` against acc3 (primary); on failure, retry against acc1
     (fallback). Each account has its own ExternalId (see config)."""
     attempts = [
-        (config.BEDROCK_ACCT_PRIMARY, config.BEDROCK_EXTERNAL_ID_PRIMARY),
-        (config.BEDROCK_ACCT_FALLBACK, config.BEDROCK_EXTERNAL_ID_FALLBACK),
+        (
+            config.BEDROCK_ACCT_PRIMARY,
+            config.BEDROCK_ROLE_NAME_PRIMARY,
+            config.BEDROCK_EXTERNAL_ID_PRIMARY,
+        ),
+        (
+            config.BEDROCK_ACCT_FALLBACK,
+            config.BEDROCK_ROLE_NAME_FALLBACK,
+            config.BEDROCK_EXTERNAL_ID_FALLBACK,
+        ),
     ]
     last_err: Optional[Exception] = None
-    for acct, ext_id in attempts:
+    for acct, role_name, ext_id in attempts:
         try:
-            client = _bedrock_for_account(acct, ext_id, client_factory)
+            client = _bedrock_for_account(acct, role_name, ext_id, client_factory)
             return op(client)
         except Exception as e:  # noqa: BLE001 — deliberately broad, we failover
             last_err = e
