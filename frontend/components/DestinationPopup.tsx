@@ -14,6 +14,17 @@ function label(v: string): string {
   return v.replace(/_/g, " ");
 }
 
+const ACTIVITY_ICON: Record<string, string> = {
+  trekking: "🥾",
+  cultural_heritage: "🏛️",
+  wildlife_nature: "🐾",
+  water_activities: "🌊",
+  culinary: "🍜",
+  wellness_relaxation: "🧘",
+  adventure_sport: "🪂",
+  local_immersion: "🫖",
+};
+
 export default function DestinationPopup({ destinationId, onClose }: Props) {
   const { add, remove, inTripComponentIds, itinerary } = useTrip();
   const [detail, setDetail] = useState<DestinationDetail | null>(null);
@@ -39,71 +50,105 @@ export default function DestinationPopup({ destinationId, onClose }: Props) {
   };
 
   return (
-    <div className="absolute right-4 top-4 z-20 w-80 rounded-lg bg-white p-4 shadow-lg">
-      <div className="flex items-start justify-between">
-        <div>
-          <h3 className="text-base font-semibold">
+    <div className="aa-animate-in absolute right-4 top-4 z-20 w-[22rem] overflow-hidden rounded-2xl border border-aa-line bg-white shadow-aa">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 border-b border-aa-line bg-aa-offwhite px-4 py-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-base font-semibold text-aa-ink">
             {detail?.name ?? "Loading…"}
           </h3>
           {detail?.country && (
-            <p className="text-xs text-gray-500">{detail.country}</p>
+            <p className="mt-0.5 flex items-center gap-1 text-xs text-aa-muted">
+              <span aria-hidden>📍</span>
+              {detail.country}
+            </p>
           )}
         </div>
         <button
           onClick={onClose}
           aria-label="Close"
-          className="text-gray-400 hover:text-gray-700"
+          className="aa-focus -mr-1 rounded-lg p-1 text-aa-muted hover:bg-aa-line hover:text-aa-ink"
         >
           ✕
         </button>
       </div>
 
-      {loading && <p className="mt-3 text-sm text-gray-500">Loading…</p>}
+      <div className="px-4 py-3">
+        {loading && (
+          <p className="py-6 text-center text-sm text-aa-muted">Loading experiences…</p>
+        )}
 
-      {!loading && detail && detail.components.length === 0 && (
-        <p className="mt-3 text-sm text-gray-500">No components here.</p>
-      )}
+        {!loading && detail && detail.components.length === 0 && (
+          <p className="py-6 text-center text-sm text-aa-muted">
+            No experiences catalogued here yet.
+          </p>
+        )}
 
-      <ul className="mt-3 max-h-80 space-y-3 overflow-y-auto">
-        {detail?.components.map((c) => {
-          const inTrip = inTripComponentIds.has(c.id);
-          const day = dayOf(c.id);
-          return (
-            <li key={c.id} className="rounded border border-gray-200 p-2">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-sm font-medium">{c.name}</p>
-                  <p className="text-xs capitalize text-gray-500">
-                    {label(c.activity)} · {label(c.intensity_level)} ·{" "}
-                    {label(c.duration_hint)}
-                  </p>
+        {!loading && detail && detail.components.length > 0 && (
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-aa-muted">
+            {detail.components.length} experience
+            {detail.components.length > 1 ? "s" : ""} to pin
+          </p>
+        )}
+
+        <ul className="max-h-[22rem] space-y-2.5 overflow-y-auto">
+          {detail?.components.map((c) => {
+            const inTrip = inTripComponentIds.has(c.id);
+            const day = dayOf(c.id);
+            return (
+              <li
+                key={c.id}
+                className={`rounded-xl border p-3 transition ${
+                  inTrip
+                    ? "border-aa-gold/50 bg-aa-gold-soft"
+                    : "border-aa-line bg-white hover:border-aa-gold/40"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-aa-ink">{c.name}</p>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] capitalize text-aa-muted">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-aa-sand px-2 py-0.5">
+                        <span aria-hidden>{ACTIVITY_ICON[c.activity] ?? "•"}</span>
+                        {label(c.activity)}
+                      </span>
+                      <span className="rounded-full bg-aa-sand px-2 py-0.5">
+                        {label(c.intensity_level)}
+                      </span>
+                      <span className="rounded-full bg-aa-sand px-2 py-0.5">
+                        {label(c.duration_hint)}
+                      </span>
+                    </p>
+                  </div>
+                  {inTrip ? (
+                    <button
+                      onClick={() => remove(c.id)}
+                      className="aa-focus shrink-0 rounded-lg border border-aa-line bg-white px-2.5 py-1 text-xs font-medium text-aa-muted hover:border-red-300 hover:text-red-600"
+                    >
+                      Remove
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => add(c.id)}
+                      className="aa-focus shrink-0 rounded-lg bg-aa-gold px-3 py-1 text-xs font-semibold text-white shadow-aa-sm hover:bg-aa-gold-dark"
+                    >
+                      + Add
+                    </button>
+                  )}
                 </div>
-                {inTrip ? (
-                  <button
-                    onClick={() => remove(c.id)}
-                    className="shrink-0 rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                  >
-                    Remove
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => add(c.id)}
-                    className="shrink-0 rounded border border-emerald-500 bg-emerald-500 px-2 py-1 text-xs text-white hover:bg-emerald-600"
-                  >
-                    Add
-                  </button>
-                )}
-              </div>
-              <p className="mt-1 text-xs text-gray-600">{c.text_extract}</p>
-              {inTrip && day !== null && (
-                <p className="mt-1 text-xs font-medium text-emerald-700">
-                  In your trip — Day {day}
+                <p className="mt-1.5 text-xs leading-relaxed text-aa-ink-soft">
+                  {c.text_extract}
                 </p>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                {inTrip && day !== null && (
+                  <p className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-aa-gold-dark">
+                    <span aria-hidden>✓</span> In your trip — Day {day}
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
     </div>
   );
 }

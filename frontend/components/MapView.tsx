@@ -106,9 +106,11 @@ export default function MapView() {
         source: SOURCE_ID,
         filter: ["has", "point_count"],
         paint: {
-          "circle-color": "#059669",
+          "circle-color": "#DB9628",
           "circle-radius": ["step", ["get", "point_count"], 16, 10, 22, 30, 28],
-          "circle-opacity": 0.85,
+          "circle-opacity": 0.9,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff",
         },
       });
       map.addLayer({
@@ -128,9 +130,9 @@ export default function MapView() {
         source: SOURCE_ID,
         filter: ["!", ["has", "point_count"]],
         paint: {
-          "circle-color": "#0f766e",
+          "circle-color": "#1F2933",
           "circle-radius": 8,
-          "circle-stroke-width": 2,
+          "circle-stroke-width": 2.5,
           "circle-stroke-color": "#ffffff",
         },
       });
@@ -180,9 +182,9 @@ export default function MapView() {
 
   if (!hasMapboxToken()) {
     return (
-      <div className="absolute inset-0 flex items-center justify-center bg-gray-50 text-center text-gray-500">
-        <div>
-          <p className="font-medium">Map token not set</p>
+      <div className="absolute inset-0 flex items-center justify-center bg-aa-sand text-center text-aa-muted">
+        <div className="max-w-sm rounded-2xl border border-aa-line bg-white p-6 shadow-aa">
+          <p className="font-semibold text-aa-ink">Map token not set</p>
           <p className="mt-1 text-sm">
             Add NEXT_PUBLIC_MAPBOX_TOKEN to frontend/.env.local to load the map.
           </p>
