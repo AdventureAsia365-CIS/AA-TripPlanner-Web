@@ -116,11 +116,11 @@ async def _ensure_guest_session(conn: _Conn, session_id: str) -> None:
     await conn.execute(
         """
         INSERT INTO tripplanner.sessions (id, guest_token, expires_at)
-        VALUES ($1, $1::text, now() + ($2 || ' days')::interval)
+        VALUES ($1::uuid, ($1::uuid)::text, now() + make_interval(days => $2::int))
         ON CONFLICT (id) DO NOTHING
         """,
         session_id,
-        str(config.GUEST_SESSION_DAYS),
+        config.GUEST_SESSION_DAYS,
     )
 
 
