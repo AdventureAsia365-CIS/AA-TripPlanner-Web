@@ -6,7 +6,16 @@ import { useTrip } from "@/lib/useTrip";
 const LONG_TRIP_WARN_DAYS = 25;
 
 export default function TripPanel() {
-  const { itinerary, status, remove, reorder, send } = useTrip();
+  const {
+    itinerary,
+    status,
+    narration,
+    narrating,
+    remove,
+    reorder,
+    narrate,
+    send,
+  } = useTrip();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [showReg, setShowReg] = useState(false);
   const [reg, setReg] = useState({ name: "", phone: "", email: "" });
@@ -113,6 +122,36 @@ export default function TripPanel() {
             <p className="mt-2 px-1 text-[11px] text-aa-muted">
               Drag day cards to reorder.
             </p>
+
+            {/* AI narration — proposes connective day-by-day copy. The
+                customer's chosen order is always respected. */}
+            <div className="mt-4 rounded-xl border border-aa-line bg-white p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-aa-ink">
+                  Day-by-day narration
+                </p>
+                <button
+                  onClick={() => narrate("compose")}
+                  disabled={narrating}
+                  className="aa-focus rounded-lg border border-aa-gold px-2.5 py-1 text-xs font-semibold text-aa-gold-dark transition hover:bg-aa-gold-soft disabled:opacity-50"
+                >
+                  {narrating
+                    ? "Composing…"
+                    : narration
+                      ? "Regenerate"
+                      : "✨ Compose"}
+                </button>
+              </div>
+              {narration ? (
+                <p className="mt-2 whitespace-pre-line text-xs leading-relaxed text-aa-ink-soft">
+                  {narration}
+                </p>
+              ) : (
+                <p className="mt-2 text-[11px] text-aa-muted">
+                  Let AI write a warm intro for each day, in your chosen order.
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Sticky CTA footer */}

@@ -306,6 +306,74 @@ async def test_handler_send_registers_then_sends_and_notifies(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_handler_narrate_returns_narration():
+    conn = FakeConn()
+    await events.append_event(conn, "t1", "s1", "add_component", {"component_id": "c1"})
+    await events.append_event(conn, "t1", "s1", "add_component", {"component_id": "c3"})
+
+    def fake_narrator(itinerary):
+        # asserts the handler passed a non-empty, day-ordered itinerary
+        assert itinerary and itinerary[0]["day"] == 1
+        yield "Composed narration for "
+        yield f"{len(itinerary)} days."
+
+    resp = await handler.route(
+        "POST", "/trip/t1/narrate", {"session_id": "s1"},
+        conn=conn, narrator=fake_narrator,
+    )
+    assert resp["statusCode"] == 200
+    body = json.loads(resp["body"])
+    assert body["mode"] == "compose"
+    assert body["narration"] == "Composed narration for 2 days."
+    assert len(body["itinerary"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_handler_narrate_empty_trip_400():
+    conn = FakeConn()
+    resp = await handler.route(
+        "POST", "/trip/empty/narrate", {"session_id": "s1"},
+        conn=conn, narrator=lambda it: iter(["x"]),
+    )
+    assert resp["statusCode"] == 400
+    assert json.loads(resp["body"])["error"] == "empty_trip"
+
+
+@pytest.mark.asyncio
+async def test_handler_narrate_requires_session_id():
+    conn = FakeConn()
+    resp = await handler.route("POST", "/trip/t1/narrate", {}, conn=conn)
+    assert resp["statusCode"] == 400
+
+
+@pytest.mark.asyncio
+async def test_handler_narrate_bad_mode_400():
+    conn = FakeConn()
+    resp = await handler.route(
+        "POST", "/trip/t1/narrate", {"session_id": "s1", "mode": "bogus"},
+        conn=conn, narrator=lambda it: iter(["x"]),
+    )
+    assert resp["statusCode"] == 400
+
+
+@pytest.mark.asyncio
+async def test_handler_narrate_bedrock_failure_502():
+    conn = FakeConn()
+    await events.append_event(conn, "t1", "s1", "add_component", {"component_id": "c1"})
+
+    def boom(itinerary):
+        raise RuntimeError("bedrock down")
+        yield  # pragma: no cover — make it a generator
+
+    resp = await handler.route(
+        "POST", "/trip/t1/narrate", {"session_id": "s1"},
+        conn=conn, narrator=boom,
+    )
+    assert resp["statusCode"] == 502
+    assert json.loads(resp["body"])["error"] == "narration_failed"
+
+
+@pytest.mark.asyncio
 async def test_handler_send_allows_edit_after_sent(monkeypatch):
     # after 'sent', another add keeps status 'sent' in projection (not locked)
     monkeypatch.setattr(config, "REQUIRE_REGISTRATION_BEFORE_HANDOFF", False)

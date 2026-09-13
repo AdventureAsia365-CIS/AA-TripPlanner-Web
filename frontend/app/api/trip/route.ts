@@ -39,6 +39,10 @@ export async function POST(req: NextRequest) {
       path = `/trip/${tripId}/send-to-advisor`;
       payload = { session_id: b.session_id, customer: b.customer };
       break;
+    case "narrate":
+      path = `/trip/${tripId}/narrate`;
+      payload = { session_id: b.session_id, mode: b.mode };
+      break;
     default:
       return NextResponse.json({ error: "unknown op" }, { status: 400 });
   }
