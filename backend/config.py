@@ -46,7 +46,14 @@ BEDROCK_REGION = _get("BEDROCK_REGION", "us-west-1")
 # (the bare foundation-model id fails with ValidationException).
 BEDROCK_ACCT_PRIMARY = _get("BEDROCK_ACCT_PRIMARY", "786888028788")   # acc3
 BEDROCK_ACCT_FALLBACK = _get("BEDROCK_ACCT_FALLBACK", "867490540162")  # acc1
-BEDROCK_ROLE_NAME = _get("BEDROCK_ROLE_NAME", "")  # cross-account role to assume
+# The satellite invoker role has a DIFFERENT name on each account:
+#   acc3 (primary)  -> AA3-Bedrock-Invoker
+#   acc1 (fallback) -> AA-Bedrock-Invoker
+# so a single role name cannot cover both. BEDROCK_ROLE_NAME is kept only as
+# a legacy fallback default if a per-account name is not set.
+BEDROCK_ROLE_NAME = _get("BEDROCK_ROLE_NAME", "")  # legacy single-role fallback
+BEDROCK_ROLE_NAME_PRIMARY = _get("BEDROCK_ROLE_NAME_PRIMARY", "AA3-Bedrock-Invoker")
+BEDROCK_ROLE_NAME_FALLBACK = _get("BEDROCK_ROLE_NAME_FALLBACK", "AA-Bedrock-Invoker")
 BEDROCK_EXTERNAL_ID_PRIMARY = _get("BEDROCK_EXTERNAL_ID_PRIMARY", "aa296-satellite-bedrock-acc3")
 BEDROCK_EXTERNAL_ID_FALLBACK = _get("BEDROCK_EXTERNAL_ID_FALLBACK", "aa296-satellite-bedrock")
 BEDROCK_MODEL_COMPOSE = _get("BEDROCK_MODEL_COMPOSE", "us.anthropic.claude-sonnet-4-6")

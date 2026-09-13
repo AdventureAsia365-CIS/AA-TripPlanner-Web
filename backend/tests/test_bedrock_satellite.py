@@ -12,8 +12,12 @@ from backend.shared import bedrock_satellite as bs
 
 @pytest.fixture(autouse=True)
 def _role_configured(monkeypatch):
-    # Ensure a role name exists so _role_arn doesn't raise.
-    monkeypatch.setattr(config, "BEDROCK_ROLE_NAME", "TripPlannerBedrockRole")
+    # Ensure per-account role names exist so _role_arn doesn't raise. The two
+    # satellite accounts use DIFFERENT role names in production (acc3
+    # AA3-Bedrock-Invoker / acc1 AA-Bedrock-Invoker); mirror that here.
+    monkeypatch.setattr(config, "BEDROCK_ROLE_NAME", "")
+    monkeypatch.setattr(config, "BEDROCK_ROLE_NAME_PRIMARY", "PrimaryBedrockRole")
+    monkeypatch.setattr(config, "BEDROCK_ROLE_NAME_FALLBACK", "FallbackBedrockRole")
     monkeypatch.setattr(config, "BEDROCK_ACCT_PRIMARY", "111111111111")
     monkeypatch.setattr(config, "BEDROCK_ACCT_FALLBACK", "222222222222")
 
@@ -21,13 +25,15 @@ def _role_configured(monkeypatch):
 # --- Stub building blocks ---------------------------------------------------
 
 class StubSts:
-    def __init__(self, account_seen: list):
+    def __init__(self, account_seen: list, arns_seen: list | None = None):
         self._seen = account_seen
+        self._arns = arns_seen if arns_seen is not None else []
 
     def assume_role(self, *, RoleArn, RoleSessionName, ExternalId=None):
-        # Record which account's role was assumed.
+        # Record which account's role was assumed, and the full ARN.
         acct = RoleArn.split(":")[4]
         self._seen.append(acct)
+        self._arns.append(RoleArn)
         return {
             "Credentials": {
                 "AccessKeyId": f"AKIA-{acct}",
@@ -161,7 +167,10 @@ def test_embed_returns_vector_direct_no_assume_role(monkeypatch):
 
 
 def test_missing_role_raises(monkeypatch):
+    # All three role-name sources empty -> _role_arn must raise.
     monkeypatch.setattr(config, "BEDROCK_ROLE_NAME", "")
+    monkeypatch.setattr(config, "BEDROCK_ROLE_NAME_PRIMARY", "")
+    monkeypatch.setattr(config, "BEDROCK_ROLE_NAME_FALLBACK", "")
     seen: list = []
     factory = make_factory(
         primary_bedrock=StubBedrock(),
@@ -170,3 +179,28 @@ def test_missing_role_raises(monkeypatch):
     )
     with pytest.raises(bs.BedrockError):
         bs.invoke("model-x", {"prompt": "hi"}, client_factory=factory)
+
+
+def test_failover_uses_per_account_role_names():
+    """Regression: acc3 and acc1 have DIFFERENT satellite role names, so the
+    assumed-role ARNs must carry the per-account role name, not one shared
+    name for both."""
+    seen: list = []
+    arns: list = []
+
+    def factory(service, *, creds=None, region=None):
+        if service == "sts":
+            return StubSts(seen, arns)
+        if service == "bedrock-runtime":
+            acct = creds.access_key_id.split("-")[1]
+            # primary fails so we exercise BOTH assume-role calls
+            return StubBedrock(fail=True) if acct == "111111111111" else \
+                StubBedrock(response={"ok": "fallback"})
+        raise AssertionError(f"unexpected service {service}")
+
+    out = bs.invoke("model-x", {"prompt": "hi"}, client_factory=factory)
+    assert out == {"ok": "fallback"}
+    assert arns == [
+        "arn:aws:iam::111111111111:role/PrimaryBedrockRole",
+        "arn:aws:iam::222222222222:role/FallbackBedrockRole",
+    ]
