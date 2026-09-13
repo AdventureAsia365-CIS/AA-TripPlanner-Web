@@ -56,7 +56,13 @@ BEDROCK_ROLE_NAME_PRIMARY = _get("BEDROCK_ROLE_NAME_PRIMARY", "AA3-Bedrock-Invok
 BEDROCK_ROLE_NAME_FALLBACK = _get("BEDROCK_ROLE_NAME_FALLBACK", "AA-Bedrock-Invoker")
 BEDROCK_EXTERNAL_ID_PRIMARY = _get("BEDROCK_EXTERNAL_ID_PRIMARY", "aa296-satellite-bedrock-acc3")
 BEDROCK_EXTERNAL_ID_FALLBACK = _get("BEDROCK_EXTERNAL_ID_FALLBACK", "aa296-satellite-bedrock")
-BEDROCK_MODEL_COMPOSE = _get("BEDROCK_MODEL_COMPOSE", "us.anthropic.claude-sonnet-4-6")
+# The satellite invoker roles (acc3 AA3-Bedrock-Invoker / acc1
+# AA-Bedrock-Invoker) grant InvokeModel on the GLOBAL cross-region profile
+# `global.anthropic.claude-sonnet-4-6` — NOT the `us.` profile. Verified
+# live against AA-Bedrock-Invoker's InvokeApprovedClaudeModelsOnly policy
+# (AA-CIS-Infra accounts/acc1-bedrock/bedrock_invoker_import.tf). Using the
+# `us.` id fails with AccessDenied on the inference-profile ARN.
+BEDROCK_MODEL_COMPOSE = _get("BEDROCK_MODEL_COMPOSE", "global.anthropic.claude-sonnet-4-6")
 
 # Embedding — Cohere Embed v4 via a DIRECT Bedrock call on acc2 (no
 # satellite: acc2 CAN invoke Cohere embeddings). Verified live:
