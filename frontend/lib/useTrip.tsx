@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import * as api from "./api";
-import type { BrowseFilters, ItineraryDay } from "./types";
+import type { BrowseFilters, DestinationPin, ItineraryDay } from "./types";
 
 // Guest identity: a random session + trip id, held in memory only (guests
 // are not persisted — lost on tab close, per requirements).
@@ -27,10 +27,20 @@ interface TripState {
   filters: BrowseFilters;
   status: string;
   inTripComponentIds: Set<string>;
+  narration: string;
+  narrating: boolean;
+  // Semantic search: when searchResults is non-null the map shows this
+  // ranked set instead of tiles-by-bounds; null means "browse mode".
+  searchQuery: string;
+  searchResults: DestinationPin[] | null;
+  searching: boolean;
   setFilters: (f: BrowseFilters) => void;
+  runSearch: (q: string) => Promise<void>;
+  clearSearch: () => void;
   add: (componentId: string) => Promise<void>;
   remove: (componentId: string) => Promise<void>;
   reorder: (orderedIds: string[]) => Promise<void>;
+  narrate: (mode?: "compose" | "renarrate") => Promise<void>;
   send: (customer?: { name: string; phone: string; email: string }) => Promise<
     { ok: boolean; needsRegistration: boolean }
   >;
@@ -48,6 +58,15 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   const [itinerary, setItinerary] = useState<ItineraryDay[]>([]);
   const [filters, setFilters] = useState<BrowseFilters>({});
   const [status, setStatus] = useState<string>("draft");
+  const [narration, setNarration] = useState<string>("");
+  const [narrating, setNarrating] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [searchResults, setSearchResults] = useState<DestinationPin[] | null>(
+    null,
+  );
+  const [searching, setSearching] = useState<boolean>(false);
+  const filtersRef = useRef<BrowseFilters>({});
+  filtersRef.current = filters;
 
   const inTripComponentIds = useMemo(
     () => new Set(itinerary.map((d) => d.component_id)),
@@ -74,6 +93,44 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     async (orderedIds: string[]) => {
       const res = await api.reorder(tripId, sessionId, orderedIds);
       if (res.itinerary) setItinerary(res.itinerary);
+    },
+    [tripId, sessionId],
+  );
+
+  const runSearch = useCallback(async (q: string) => {
+    const query = q.trim();
+    setSearchQuery(q);
+    if (!query) {
+      setSearchResults(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    try {
+      // Semantic search is ranked within the active closed-enum filters
+      // (activity/intensity/season/country) — pass the current filters.
+      const results = await api.search(query, filtersRef.current);
+      setSearchResults(results);
+    } finally {
+      setSearching(false);
+    }
+  }, []);
+
+  const clearSearch = useCallback(() => {
+    setSearchQuery("");
+    setSearchResults(null);
+    setSearching(false);
+  }, []);
+
+  const narrate = useCallback(
+    async (mode: "compose" | "renarrate" = "compose") => {
+      setNarrating(true);
+      try {
+        const res = await api.narrate(tripId, sessionId, mode);
+        if (res.ok) setNarration(res.narration);
+      } finally {
+        setNarrating(false);
+      }
     },
     [tripId, sessionId],
   );
@@ -105,10 +162,18 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     filters,
     status,
     inTripComponentIds,
+    narration,
+    narrating,
+    searchQuery,
+    searchResults,
+    searching,
     setFilters,
+    runSearch,
+    clearSearch,
     add,
     remove,
     reorder,
+    narrate,
     send,
   };
 

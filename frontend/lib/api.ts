@@ -111,6 +111,26 @@ export async function reorder(
   return res.json();
 }
 
+export async function narrate(
+  tripId: string,
+  sessionId: string,
+  mode: "compose" | "renarrate" = "compose",
+): Promise<{ ok: boolean; narration: string }> {
+  const res = await fetch("/api/trip", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      op: "narrate",
+      trip_id: tripId,
+      session_id: sessionId,
+      mode,
+    }),
+  });
+  if (!res.ok) return { ok: false, narration: "" };
+  const data = await res.json();
+  return { ok: true, narration: data.narration ?? "" };
+}
+
 export async function sendToAdvisor(
   tripId: string,
   sessionId: string,

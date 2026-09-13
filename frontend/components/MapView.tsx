@@ -27,17 +27,39 @@ function tilesForBounds(b: mapboxgl.LngLatBounds): string[] {
 }
 
 export default function MapView() {
-  const { filters } = useTrip();
+  const { filters, searchResults } = useTrip();
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const pinsRef = useRef<Map<string, DestinationPin>>(new Map());
   const [selected, setSelected] = useState<string | null>(null);
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
+  // When search is active, the map shows the ranked result set instead of
+  // tiles-by-bounds. Kept in a ref so the moveend handler can bail out.
+  const searchResultsRef = useRef(searchResults);
+  searchResultsRef.current = searchResults;
+
+  const setSourceData = useCallback((pins: DestinationPin[]) => {
+    const map = mapRef.current;
+    if (!map) return;
+    const src = map.getSource(SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
+    if (!src) return;
+    src.setData({
+      type: "FeatureCollection",
+      features: pins.map((p) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [p.lng, p.lat] },
+        properties: { id: p.id, name: p.name, count: p.component_count },
+      })),
+    });
+  }, []);
 
   const refreshVisibleTiles = useCallback(async () => {
     const map = mapRef.current;
     if (!map) return;
+    // In search mode the map shows the ranked results, not tiles — don't let
+    // a pan/zoom overwrite them.
+    if (searchResultsRef.current) return;
     const bounds = map.getBounds();
     if (!bounds) return;
     const tiles = tilesForBounds(bounds);
@@ -50,18 +72,8 @@ export default function MapView() {
     for (const pins of results) {
       for (const p of pins) merged.set(p.id, p);
     }
-    const src = map.getSource(SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
-    if (src) {
-      src.setData({
-        type: "FeatureCollection",
-        features: Array.from(merged.values()).map((p) => ({
-          type: "Feature",
-          geometry: { type: "Point", coordinates: [p.lng, p.lat] },
-          properties: { id: p.id, name: p.name, count: p.component_count },
-        })),
-      });
-    }
-  }, []);
+    setSourceData(Array.from(merged.values()));
+  }, [setSourceData]);
 
   useEffect(() => {
     if (!hasMapboxToken() || !containerRef.current || mapRef.current) return;
@@ -106,9 +118,11 @@ export default function MapView() {
         source: SOURCE_ID,
         filter: ["has", "point_count"],
         paint: {
-          "circle-color": "#059669",
+          "circle-color": "#DB9628",
           "circle-radius": ["step", ["get", "point_count"], 16, 10, 22, 30, 28],
-          "circle-opacity": 0.85,
+          "circle-opacity": 0.9,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff",
         },
       });
       map.addLayer({
@@ -128,9 +142,9 @@ export default function MapView() {
         source: SOURCE_ID,
         filter: ["!", ["has", "point_count"]],
         paint: {
-          "circle-color": "#0f766e",
+          "circle-color": "#1F2933",
           "circle-radius": 8,
-          "circle-stroke-width": 2,
+          "circle-stroke-width": 2.5,
           "circle-stroke-color": "#ffffff",
         },
       });
@@ -171,18 +185,36 @@ export default function MapView() {
     };
   }, [refreshVisibleTiles]);
 
-  // Re-query when filters change.
+  // Re-query when filters change (browse mode only).
   useEffect(() => {
+    if (searchResults) return; // filters re-apply via a fresh search instead
     if (mapRef.current && mapRef.current.isStyleLoaded()) {
       refreshVisibleTiles();
     }
-  }, [filters, refreshVisibleTiles]);
+  }, [filters, refreshVisibleTiles, searchResults]);
+
+  // Render semantic-search results (or return to tiles when cleared).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    if (searchResults === null) {
+      // Back to browse mode: repopulate from the current viewport.
+      refreshVisibleTiles();
+      return;
+    }
+    setSourceData(searchResults);
+    if (searchResults.length > 0) {
+      const b = new mapboxgl.LngLatBounds();
+      for (const p of searchResults) b.extend([p.lng, p.lat]);
+      map.fitBounds(b, { padding: 80, maxZoom: 9, duration: 600 });
+    }
+  }, [searchResults, refreshVisibleTiles, setSourceData]);
 
   if (!hasMapboxToken()) {
     return (
-      <div className="absolute inset-0 flex items-center justify-center bg-gray-50 text-center text-gray-500">
-        <div>
-          <p className="font-medium">Map token not set</p>
+      <div className="absolute inset-0 flex items-center justify-center bg-aa-sand text-center text-aa-muted">
+        <div className="max-w-sm rounded-2xl border border-aa-line bg-white p-6 shadow-aa">
+          <p className="font-semibold text-aa-ink">Map token not set</p>
           <p className="mt-1 text-sm">
             Add NEXT_PUBLIC_MAPBOX_TOKEN to frontend/.env.local to load the map.
           </p>

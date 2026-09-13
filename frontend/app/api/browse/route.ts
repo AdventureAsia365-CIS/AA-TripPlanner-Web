@@ -4,6 +4,15 @@ import { NextRequest, NextResponse } from "next/server";
 // the Lambda URL is never exposed to the browser. Maps a single
 // ?resource= entrypoint onto the Lambda's REST paths.
 const BROWSE_API_URL = process.env.BROWSE_API_URL ?? "";
+// Shared secret the Lambdas verify (X-TripPlanner-Key). Server-side only —
+// never exposed to the browser. Omitted header when unset (local dev).
+const TRIPPLANNER_API_KEY = process.env.TRIPPLANNER_API_KEY ?? "";
+
+function upstreamHeaders(extra: Record<string, string> = {}): HeadersInit {
+  const h: Record<string, string> = { ...extra };
+  if (TRIPPLANNER_API_KEY) h["x-tripplanner-key"] = TRIPPLANNER_API_KEY;
+  return h;
+}
 
 function passthroughFilters(src: URLSearchParams, dst: URLSearchParams) {
   for (const k of ["activity", "intensity_level", "country", "season"]) {
@@ -39,7 +48,7 @@ export async function GET(req: NextRequest) {
   }
 
   const upstream = await fetch(`${BROWSE_API_URL}${upstreamPath}`, {
-    headers: { accept: "application/json" },
+    headers: upstreamHeaders({ accept: "application/json" }),
   });
   const body = await upstream.text();
   // Preserve upstream cache-control (tiles/detail cacheable, search not).

@@ -18,6 +18,8 @@ from backend.shared import bedrock_satellite
 
 # Injectable streaming invoker: (model_id, body) -> iterator of chunk dicts.
 StreamInvoker = Callable[[str, dict], Iterator[dict]]
+# Injectable buffered invoker: (model_id, body) -> parsed response dict.
+Invoker = Callable[[str, dict], dict]
 
 _COMPOSE_SYSTEM = (
     "You are an Adventure Asia trip narrator. You are given an ORDERED "
@@ -63,29 +65,49 @@ def _text_from_chunk(chunk: dict) -> str:
     return ""
 
 
-def _stream(system: str, itinerary: list[dict], invoker: StreamInvoker) -> Iterator[str]:
+def _text_from_response(resp: dict) -> str:
+    """Extract the full text from a buffered Claude messages response:
+    {"content": [{"type": "text", "text": "..."}, ...], ...}."""
+    parts = resp.get("content")
+    if isinstance(parts, list):
+        return "".join(
+            p.get("text", "") for p in parts
+            if isinstance(p, dict) and p.get("type") == "text"
+        )
+    return ""
+
+
+def _run(system: str, itinerary: list[dict], invoker: Invoker) -> Iterator[str]:
+    """Buffered narration. Yields the whole text as one chunk so callers can
+    keep treating narration as an iterator of text (the handler joins it).
+
+    Uses a buffered invoke (bedrock:InvokeModel) rather than streaming
+    (InvokeModelWithResponseStream): the route buffers the full narration
+    into one JSON response anyway (no SSE to the client through the HTTP API
+    gateway), and the satellite invoker roles are granted InvokeModel only.
+    """
     body = _build_body(system, itinerary)
-    for chunk in invoker(config.BEDROCK_MODEL_COMPOSE, body):
-        text = _text_from_chunk(chunk)
-        if text:
-            yield text
+    resp = invoker(config.BEDROCK_MODEL_COMPOSE, body)
+    text = _text_from_response(resp)
+    if text:
+        yield text
 
 
 def compose(
     itinerary: list[dict],
     *,
-    invoker: Optional[StreamInvoker] = None,
+    invoker: Optional[Invoker] = None,
 ) -> Iterator[str]:
-    """Stream narration for a (re-)sequenced trip."""
-    inv = invoker or bedrock_satellite.invoke_stream
-    return _stream(_COMPOSE_SYSTEM, itinerary, inv)
+    """Narrate a (re-)sequenced trip (buffered)."""
+    inv = invoker or bedrock_satellite.invoke
+    return _run(_COMPOSE_SYSTEM, itinerary, inv)
 
 
 def renarrate(
     itinerary: list[dict],
     *,
-    invoker: Optional[StreamInvoker] = None,
+    invoker: Optional[Invoker] = None,
 ) -> Iterator[str]:
-    """Stream narration for a manually reordered trip. Never reorders."""
-    inv = invoker or bedrock_satellite.invoke_stream
-    return _stream(_RENARRATE_SYSTEM, itinerary, inv)
+    """Narrate a manually reordered trip (buffered). Never reorders."""
+    inv = invoker or bedrock_satellite.invoke
+    return _run(_RENARRATE_SYSTEM, itinerary, inv)

@@ -224,15 +224,17 @@ async def test_notify_uses_config_email():
 
 # --- agent (compose / renarrate) --------------------------------------------
 
-def _fake_stream_invoker(_model, _body):
-    # emulate Claude streaming chunks
-    for t in ["Day 1 narration. ", "Day 2 narration."]:
-        yield {"delta": {"type": "text_delta", "text": t}}
+def _fake_invoker(_model, _body):
+    # emulate a buffered Claude messages response
+    return {"content": [
+        {"type": "text", "text": "Day 1 narration. "},
+        {"type": "text", "text": "Day 2 narration."},
+    ]}
 
 
-def test_compose_streams_text():
+def test_compose_returns_text():
     itinerary = [{"day": 1, "name": "Hanoi", "text_extract": "x"}]
-    out = "".join(agent.compose(itinerary, invoker=_fake_stream_invoker))
+    out = "".join(agent.compose(itinerary, invoker=_fake_invoker))
     assert "Day 1 narration." in out
 
 
@@ -243,7 +245,7 @@ def test_renarrate_preserves_given_order_in_prompt():
 
     def capture_invoker(model, body):
         captured["body"] = body
-        return iter([])
+        return {"content": []}
 
     itinerary = [
         {"day": 1, "name": "Hoi An", "text_extract": "a"},
@@ -303,6 +305,74 @@ async def test_handler_send_registers_then_sends_and_notifies(monkeypatch):
     assert conn.sessions["s1"]["customer_id"] == "cust-1"   # registered + claimed
     assert len(sender.sent) == 1                             # advisor notified
     assert conn.drafts["t1"]["status"] == "sent"
+
+
+@pytest.mark.asyncio
+async def test_handler_narrate_returns_narration():
+    conn = FakeConn()
+    await events.append_event(conn, "t1", "s1", "add_component", {"component_id": "c1"})
+    await events.append_event(conn, "t1", "s1", "add_component", {"component_id": "c3"})
+
+    def fake_narrator(itinerary):
+        # asserts the handler passed a non-empty, day-ordered itinerary
+        assert itinerary and itinerary[0]["day"] == 1
+        yield "Composed narration for "
+        yield f"{len(itinerary)} days."
+
+    resp = await handler.route(
+        "POST", "/trip/t1/narrate", {"session_id": "s1"},
+        conn=conn, narrator=fake_narrator,
+    )
+    assert resp["statusCode"] == 200
+    body = json.loads(resp["body"])
+    assert body["mode"] == "compose"
+    assert body["narration"] == "Composed narration for 2 days."
+    assert len(body["itinerary"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_handler_narrate_empty_trip_400():
+    conn = FakeConn()
+    resp = await handler.route(
+        "POST", "/trip/empty/narrate", {"session_id": "s1"},
+        conn=conn, narrator=lambda it: iter(["x"]),
+    )
+    assert resp["statusCode"] == 400
+    assert json.loads(resp["body"])["error"] == "empty_trip"
+
+
+@pytest.mark.asyncio
+async def test_handler_narrate_requires_session_id():
+    conn = FakeConn()
+    resp = await handler.route("POST", "/trip/t1/narrate", {}, conn=conn)
+    assert resp["statusCode"] == 400
+
+
+@pytest.mark.asyncio
+async def test_handler_narrate_bad_mode_400():
+    conn = FakeConn()
+    resp = await handler.route(
+        "POST", "/trip/t1/narrate", {"session_id": "s1", "mode": "bogus"},
+        conn=conn, narrator=lambda it: iter(["x"]),
+    )
+    assert resp["statusCode"] == 400
+
+
+@pytest.mark.asyncio
+async def test_handler_narrate_bedrock_failure_502():
+    conn = FakeConn()
+    await events.append_event(conn, "t1", "s1", "add_component", {"component_id": "c1"})
+
+    def boom(itinerary):
+        raise RuntimeError("bedrock down")
+        yield  # pragma: no cover — make it a generator
+
+    resp = await handler.route(
+        "POST", "/trip/t1/narrate", {"session_id": "s1"},
+        conn=conn, narrator=boom,
+    )
+    assert resp["statusCode"] == 502
+    assert json.loads(resp["body"])["error"] == "narration_failed"
 
 
 @pytest.mark.asyncio

@@ -29,3 +29,6 @@ Thumbs.db
 /package-lock.json
 /.dbcheck*.py
 /.probe*.sql
+
+# Scratch/session artifacts (organized here, not committed)
+docs/scratch/

@@ -74,7 +74,7 @@ async def _current_components(conn: _Conn, trip_id: str) -> list[dict]:
         return []
     comp_rows = await conn.fetch(
         """
-        SELECT c.id, c.name, c.activity, c.duration_hint,
+        SELECT c.id, c.name, c.activity, c.duration_hint, c.text_extract,
                d.lat AS lat, d.lng AS lng
         FROM tripplanner.itinerary_components c
         JOIN shared.destinations d ON d.id = c.destination_id
@@ -122,6 +122,28 @@ async def _ensure_guest_session(conn: _Conn, session_id: str) -> None:
         session_id,
         config.GUEST_SESSION_DAYS,
     )
+
+
+async def current_itinerary(conn: _Conn, trip_id: str) -> list[dict]:
+    """Read-only: recompute the current day-ordered itinerary for a trip,
+    including text_extract per day (needed by the narration LLM). Uses the
+    same projection rules as append_event (deterministic sequence, unless a
+    still-valid manual reorder pins the order), but writes nothing.
+
+    Returns [{day, component_id, name, text_extract, activity, ...}].
+    """
+    components = await _current_components(conn, trip_id)
+    explicit = await _latest_explicit_order(conn, trip_id)
+    itinerary = _project_itinerary(components, explicit)
+    return [
+        {
+            "day": e["day"],
+            "component_id": e["component_id"],
+            "name": e.get("name"),
+            "text_extract": e.get("text_extract", ""),
+        }
+        for e in itinerary
+    ]
 
 
 async def append_event(

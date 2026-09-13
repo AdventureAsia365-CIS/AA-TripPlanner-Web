@@ -5,6 +5,7 @@ Routes:
   DELETE /trip/{trip_id}/components/{component_id} remove_component
   PATCH  /trip/{trip_id}/reorder                  reorder
   POST   /trip/{trip_id}/send-to-advisor          sent (+ registration)
+  POST   /trip/{trip_id}/narrate                  compose/renarrate (LLM)
 
 Stateful per-visitor; never cached. The framework-agnostic route()
 coroutine takes injectable conn + sender and is unit-tested directly.
@@ -19,6 +20,7 @@ import re
 from typing import Any, Optional
 
 from backend import config
+from backend.assembly import agent as agent_mod
 from backend.assembly import events as events_mod
 from backend.assembly import notify as notify_mod
 from backend.assembly import registration as reg_mod
@@ -27,6 +29,7 @@ _COMPONENTS_RE = re.compile(r"^/trip/([^/]+)/components$")
 _COMPONENT_ITEM_RE = re.compile(r"^/trip/([^/]+)/components/([^/]+)$")
 _REORDER_RE = re.compile(r"^/trip/([^/]+)/reorder$")
 _SEND_RE = re.compile(r"^/trip/([^/]+)/send-to-advisor$")
+_NARRATE_RE = re.compile(r"^/trip/([^/]+)/narrate$")
 
 _HEADERS = {"content-type": "application/json", "cache-control": "no-store"}
 
@@ -44,6 +47,7 @@ async def route(
     *,
     conn,
     sender: Optional[notify_mod.Sender] = None,
+    narrator: Optional[Any] = None,
 ) -> dict:
     sender = sender or notify_mod.LoggingSender()
 
@@ -113,7 +117,42 @@ async def route(
         await notify_mod.notify_advisor(trip_id, event_log, sender=sender)
         return _resp(200, {"trip_id": trip_id, "status": "sent", "itinerary": itinerary})
 
+    m = _NARRATE_RE.match(path)
+    if m and method == "POST":
+        trip_id = m.group(1)
+        session_id = body.get("session_id")
+        if not session_id:
+            return _resp(400, {"error": "session_id required"})
+        # mode selects the prompt: "renarrate" respects a manual order and
+        # never re-sequences; "compose" (default) narrates a fresh sequence.
+        mode = body.get("mode") or "compose"
+        if mode not in ("compose", "renarrate"):
+            return _resp(400, {"error": "mode must be 'compose' or 'renarrate'"})
+
+        itinerary = await events_mod.current_itinerary(conn, trip_id)
+        if not itinerary:
+            return _resp(400, {"error": "empty_trip",
+                               "detail": "pin at least one component before narrating"})
+
+        narrate_fn = _resolve_narrator(mode, narrator)
+        try:
+            narration = "".join(narrate_fn(itinerary))
+        except Exception as e:  # noqa: BLE001 — surface Bedrock failure as 502
+            return _resp(502, {"error": "narration_failed", "detail": str(e)})
+
+        return _resp(200, {"trip_id": trip_id, "mode": mode,
+                           "narration": narration, "itinerary": itinerary})
+
     return _resp(404, {"error": "not found"})
+
+
+def _resolve_narrator(mode: str, narrator: Optional[Any]):
+    """Pick the narration function. `narrator`, when supplied (tests), is a
+    callable(itinerary)->iterator[str] used for BOTH modes; otherwise the
+    real agent.compose / agent.renarrate are used."""
+    if narrator is not None:
+        return narrator
+    return agent_mod.renarrate if mode == "renarrate" else agent_mod.compose
 
 
 async def _is_registered(conn, session_id: str) -> bool:
@@ -156,7 +195,12 @@ def _extract_request(event: dict) -> tuple[str, str, dict]:
 def handler(event, context):  # pragma: no cover - thin AWS adapter
     import asyncio
 
+    from backend.shared import auth
     from backend.shared.db import get_pool
+
+    denied = auth.check_event(event)
+    if denied is not None:
+        return denied
 
     method, path, body = _extract_request(event)
 
