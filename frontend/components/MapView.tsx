@@ -6,6 +6,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { fetchByCountry, fetchTile } from "@/lib/api";
 import { fetchRoute, hasMapboxToken, MAPBOX_TOKEN, tileIdFor } from "@/lib/mapbox";
 import type { DestinationPin } from "@/lib/types";
+import { COUNTRY_BBOX } from "@/lib/types";
 import { useTrip } from "@/lib/useTrip";
 import DestinationPopup from "./DestinationPopup";
 
@@ -269,13 +270,25 @@ export default function MapView() {
     let cancelled = false;
     fetchByCountry(country).then((pins) => {
       if (cancelled || !mapRef.current) return;
-      // Respect other active filters (activity/intensity/season) by keeping
-      // only pins that also pass the tile query; simplest: show country pins
-      // and let a subsequent tile refresh (on moveend) reconcile.
       setSourceData(pins);
-      if (pins.length > 0) {
+      // Fit to the country. A known data issue: some places are mis-geocoded
+      // onto the wrong continent, which would blow the camera out to a world
+      // view. Clamp the fit to the country's approximate bbox so outliers
+      // don't drag the camera; if none fall inside, fall back to all pins.
+      const bbox = COUNTRY_BBOX[country];
+      const inBox = bbox
+        ? pins.filter(
+            (p) =>
+              p.lng >= bbox[0] &&
+              p.lng <= bbox[2] &&
+              p.lat >= bbox[1] &&
+              p.lat <= bbox[3],
+          )
+        : pins;
+      const fitPins = inBox.length > 0 ? inBox : pins;
+      if (fitPins.length > 0) {
         const b = new mapboxgl.LngLatBounds();
-        for (const p of pins) b.extend([p.lng, p.lat]);
+        for (const p of fitPins) b.extend([p.lng, p.lat]);
         map.fitBounds(b, { padding: 80, maxZoom: 8, duration: 700 });
       }
     });
