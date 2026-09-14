@@ -296,6 +296,32 @@ def test_build_narration_prefers_master_and_flags_missing():
     assert [m["day"] for m in missing] == [2]
 
 
+# --- suggestions ------------------------------------------------------------
+
+def test_avg_vector_literal():
+    from backend.assembly import suggestions
+    lit = suggestions._avg_vector_literal([[0.0, 2.0], [2.0, 0.0]])
+    assert lit == "[1.0,1.0]"
+    assert suggestions._avg_vector_literal([]) is None
+
+
+@pytest.mark.asyncio
+async def test_suggest_empty_trip_returns_empty():
+    from backend.assembly import suggestions
+    conn = FakeConn()
+    out = await suggestions.suggest(conn, "no-such-trip")
+    assert out == {"suggestions": []}
+
+
+@pytest.mark.asyncio
+async def test_handler_suggestions_route_ok():
+    conn = FakeConn()
+    await events.append_event(conn, "t1", "s1", "add_component", {"component_id": "c1"})
+    resp = await handler.route("GET", "/trip/t1/suggestions", {}, conn=conn)
+    assert resp["statusCode"] == 200
+    assert "suggestions" in json.loads(resp["body"])
+
+
 # --- handler routing --------------------------------------------------------
 
 @pytest.mark.asyncio

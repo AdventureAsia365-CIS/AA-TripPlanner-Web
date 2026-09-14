@@ -25,7 +25,13 @@ export async function GET(req: NextRequest) {
   if (!tripId) {
     return NextResponse.json({ error: "trip_id required" }, { status: 400 });
   }
-  const upstream = await fetch(`${TRIP_API_URL}/trip/${tripId}`, {
+  // resource=suggestions -> next-to-pin recommendations for this trip.
+  const resource = req.nextUrl.searchParams.get("resource");
+  const path =
+    resource === "suggestions"
+      ? `/trip/${tripId}/suggestions`
+      : `/trip/${tripId}`;
+  const upstream = await fetch(`${TRIP_API_URL}${path}`, {
     method: "GET",
     headers: tripHeaders(),
   });

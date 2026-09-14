@@ -84,7 +84,8 @@ function tilesForBounds(b: mapboxgl.LngLatBounds): string[] {
 }
 
 export default function MapView() {
-  const { filters, searchResults, itinerary } = useTrip();
+  const { filters, searchResults, itinerary, focusDestinationId, focusDestination } =
+    useTrip();
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const pinsRef = useRef<Map<string, DestinationPin>>(new Map());
@@ -463,6 +464,20 @@ export default function MapView() {
           : [],
     });
   }, [itinerary]);
+
+  // Open a destination's popup when something (e.g. a suggestion click) asks
+  // to focus it, then clear the request. The user still picks a specific
+  // component from the popup (never a whole-destination add).
+  useEffect(() => {
+    if (!focusDestinationId) return;
+    setSelected(focusDestinationId);
+    const map = mapRef.current;
+    const pin = pinsRef.current.get(focusDestinationId);
+    if (map && pin) {
+      map.easeTo({ center: [pin.lng, pin.lat], zoom: Math.max(map.getZoom(), 7) });
+    }
+    focusDestination(null);
+  }, [focusDestinationId, focusDestination]);
 
   if (!hasMapboxToken()) {
     return (

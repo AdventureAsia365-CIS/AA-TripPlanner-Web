@@ -177,3 +177,24 @@ export async function sendToAdvisor(
   });
   return { status: res.status, body: await res.json() };
 }
+
+export interface Suggestion {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  country: string;
+  component_count: number;
+  why: string;
+}
+
+// Next-to-pin suggestions for the current trip (Assembly Lambda; per-visitor
+// state, never cached). Returns [] when the trip is empty or has no basis.
+export async function fetchSuggestions(tripId: string): Promise<Suggestion[]> {
+  const res = await fetch(
+    `/api/trip?resource=suggestions&trip_id=${encodeURIComponent(tripId)}`,
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.suggestions ?? [];
+}
