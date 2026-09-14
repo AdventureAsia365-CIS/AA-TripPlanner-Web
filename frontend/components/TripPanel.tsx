@@ -72,6 +72,8 @@ export default function TripPanel() {
     narration,
     narrating,
     narrationSource,
+    suggestions,
+    focusDestination,
     remove,
     reorder,
     narrate,
@@ -388,6 +390,32 @@ export default function TripPanel() {
               travel modes are suggestions — your advisor arranges the real
               transfers, boats and flights for an adventure route.
             </p>
+
+            {/* Next-to-pin suggestions — places similar to what's pinned.
+                Clicking opens the destination so the traveller picks a
+                specific experience (never a whole-destination add). */}
+            {suggestions.length > 0 && (
+              <div className="mt-4 rounded-xl border border-aa-line bg-white p-3">
+                <p className="text-xs font-semibold text-aa-ink">
+                  You might also like
+                </p>
+                <p className="mt-0.5 text-[11px] text-aa-muted">
+                  Based on what you&apos;ve pinned.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {suggestions.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => focusDestination(s.id)}
+                      title={`${s.name} — ${s.why}`}
+                      className="aa-focus rounded-full border border-aa-line px-2.5 py-1 text-xs text-aa-ink transition hover:border-aa-gold/60 hover:bg-aa-gold-soft"
+                    >
+                      + {s.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* AI narration — proposes connective day-by-day copy. The
                 customer's chosen order is always respected. */}

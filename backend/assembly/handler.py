@@ -25,12 +25,14 @@ from backend.assembly import events as events_mod
 from backend.assembly import master_content
 from backend.assembly import notify as notify_mod
 from backend.assembly import registration as reg_mod
+from backend.assembly import suggestions as suggest_mod
 
 _COMPONENTS_RE = re.compile(r"^/trip/([^/]+)/components$")
 _COMPONENT_ITEM_RE = re.compile(r"^/trip/([^/]+)/components/([^/]+)$")
 _REORDER_RE = re.compile(r"^/trip/([^/]+)/reorder$")
 _SEND_RE = re.compile(r"^/trip/([^/]+)/send-to-advisor$")
 _NARRATE_RE = re.compile(r"^/trip/([^/]+)/narrate$")
+_SUGGEST_RE = re.compile(r"^/trip/([^/]+)/suggestions$")
 _TRIP_RE = re.compile(r"^/trip/([^/]+)$")
 
 _HEADERS = {"content-type": "application/json", "cache-control": "no-store"}
@@ -152,6 +154,12 @@ async def route(
 
         return _resp(200, {"trip_id": trip_id, "mode": mode, "source": source,
                            "narration": narration, "itinerary": itinerary})
+
+    m = _SUGGEST_RE.match(path)
+    if m and method == "GET":
+        trip_id = m.group(1)
+        result = await suggest_mod.suggest(conn, trip_id)
+        return _resp(200, {"trip_id": trip_id, **result})
 
     return _resp(404, {"error": "not found"})
 

@@ -16,6 +16,7 @@ import type {
   DestinationPin,
   ItineraryDay,
 } from "./types";
+import type { Suggestion } from "./api";
 
 // Guest identity: a random session + trip id, held in memory only (guests
 // are not persisted — lost on tab close, per requirements).
@@ -45,6 +46,13 @@ interface TripState {
   searching: boolean;
   // Countries that actually have components (for the country-first filter).
   countries: CountryOption[];
+  // Next-to-pin suggestions, refreshed as the trip changes.
+  suggestions: Suggestion[];
+  // A destination the UI wants to open (e.g. from a suggestion click). The
+  // map listens and opens that destination's popup so the user picks a
+  // specific component (per product rule: never "add a whole destination").
+  focusDestinationId: string | null;
+  focusDestination: (id: string | null) => void;
   setFilters: (f: BrowseFilters) => void;
   runSearch: (q: string) => Promise<void>;
   clearSearch: () => void;
@@ -98,6 +106,10 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   const [filters, setFilters] = useState<BrowseFilters>({});
   const [status, setStatus] = useState<string>("draft");
   const [countries, setCountries] = useState<CountryOption[]>([]);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [focusDestinationId, setFocusDestinationId] = useState<string | null>(
+    null,
+  );
   const [narration, setNarration] = useState<string>("");
   const [narrationSource, setNarrationSource] = useState<string>("");
   const [narrating, setNarrating] = useState<boolean>(false);
@@ -139,6 +151,27 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
       active = false;
     };
   }, [tripId]);
+
+  // Refresh next-to-pin suggestions whenever the trip's component set
+  // changes. Keyed on the sorted component ids so a reorder doesn't refetch.
+  const suggestKey = itinerary
+    .map((d) => d.component_id)
+    .sort()
+    .join(",");
+  useEffect(() => {
+    if (!suggestKey) {
+      setSuggestions([]);
+      return;
+    }
+    let active = true;
+    api.fetchSuggestions(tripId).then((s) => {
+      if (active) setSuggestions(s);
+    });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestKey, tripId]);
 
   const add = useCallback(
     async (componentId: string) => {
@@ -239,6 +272,9 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     searchResults,
     searching,
     countries,
+    suggestions,
+    focusDestinationId,
+    focusDestination: setFocusDestinationId,
     setFilters,
     runSearch,
     clearSearch,
