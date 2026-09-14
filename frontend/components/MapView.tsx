@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { fetchByCountry, fetchTile } from "@/lib/api";
-import { fetchRoute, hasMapboxToken, MAPBOX_TOKEN, tileIdFor } from "@/lib/mapbox";
+import { hasMapboxToken, MAPBOX_TOKEN, tileIdFor } from "@/lib/mapbox";
 import type { DestinationPin } from "@/lib/types";
 import { COUNTRY_BBOX, COUNTRY_ISO } from "@/lib/types";
 import { useTrip } from "@/lib/useTrip";
@@ -14,6 +14,59 @@ const SOURCE_ID = "destinations";
 const TRIP_LINE_SOURCE = "trip-line";
 const TRIP_STOP_SOURCE = "trip-stops";
 const COUNTRY_SOURCE = "country-boundaries";
+
+// Interpolate a great-circle arc between two [lng,lat] points (n segments).
+// A slight arc (vs a dead-straight segment) reads as "travel between", and
+// stays visually sensible over long spans.
+function greatCircleSegment(
+  a: [number, number],
+  b: [number, number],
+  n = 24,
+): [number, number][] {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  const lat1 = toRad(a[1]);
+  const lon1 = toRad(a[0]);
+  const lat2 = toRad(b[1]);
+  const lon2 = toRad(b[0]);
+  const d =
+    2 *
+    Math.asin(
+      Math.min(
+        1,
+        Math.sqrt(
+          Math.sin((lat2 - lat1) / 2) ** 2 +
+            Math.cos(lat1) * Math.cos(lat2) * Math.sin((lon2 - lon1) / 2) ** 2,
+        ),
+      ),
+    );
+  if (d === 0) return [a, b];
+  const out: [number, number][] = [];
+  for (let i = 0; i <= n; i++) {
+    const f = i / n;
+    const A = Math.sin((1 - f) * d) / Math.sin(d);
+    const B = Math.sin(f * d) / Math.sin(d);
+    const x = A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
+    const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
+    const z = A * Math.sin(lat1) + B * Math.sin(lat2);
+    const lat = Math.atan2(z, Math.sqrt(x * x + y * y));
+    const lon = Math.atan2(y, x);
+    out.push([toDeg(lon), toDeg(lat)]);
+  }
+  return out;
+}
+
+// Chain great-circle segments through an ordered list of stops.
+function greatCirclePath(stops: [number, number][]): [number, number][] {
+  if (stops.length < 2) return [];
+  const path: [number, number][] = [];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const seg = greatCircleSegment(stops[i], stops[i + 1]);
+    if (i > 0) seg.shift(); // avoid duplicating the shared vertex
+    path.push(...seg);
+  }
+  return path;
+}
 
 // Enumerate the integer 1° tiles covering the current map bounds.
 function tilesForBounds(b: mapboxgl.LngLatBounds): string[] {
@@ -211,10 +264,15 @@ export default function MapView() {
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           // Deeper gold for the line so it stays distinct from the brighter
-          // gold day-stop dots that sit on top of it.
+          // gold day-stop dots that sit on top of it. Dashed on purpose: this
+          // shows day-to-day SEQUENCE, not a drivable road route — stops are
+          // often hundreds of km apart (real transfers are flights/transfers
+          // an advisor arranges), so a solid road line would be misleading
+          // and can detour across borders.
           "line-color": "#B87A1A",
-          "line-width": 4,
-          "line-opacity": 0.95,
+          "line-width": 3,
+          "line-opacity": 0.9,
+          "line-dasharray": [2, 1.5],
         },
       });
       map.addLayer({
@@ -386,41 +444,24 @@ export default function MapView() {
 
     // A line needs at least 2 distinct points; dedupe consecutive identical
     // coords (several components can share one destination's coordinate).
-    const straight = pts.map((p) => p.coord).filter(
+    const stops = pts.map((p) => p.coord).filter(
       (c, i, arr) => i === 0 || c[0] !== arr[i - 1][0] || c[1] !== arr[i - 1][1],
     );
 
-    const setLine = (coords: [number, number][]) =>
-      lineSrc.setData({
-        type: "FeatureCollection",
-        features:
-          coords.length >= 2
-            ? [{ type: "Feature", geometry: { type: "LineString", coordinates: coords }, properties: {} }]
-            : [],
-      });
-
-    // Draw the straight path immediately (instant feedback), then upgrade to
-    // a real road-following route from Mapbox Directions when it resolves.
-    // Falls back to the straight line if Directions fails (e.g. points not
-    // connected by road — islands/cross-water).
-    setLine(straight);
-    if (straight.length < 2) return;
-
-    let cancelled = false;
-    fetchRoute(straight).then((route) => {
-      if (cancelled) return;
-      const src = map.getSource(TRIP_LINE_SOURCE) as mapboxgl.GeoJSONSource | undefined;
-      if (!src) return;
-      if (route && route.length >= 2) {
-        src.setData({
-          type: "FeatureCollection",
-          features: [{ type: "Feature", geometry: { type: "LineString", coordinates: route }, properties: {} }],
-        });
-      }
+    // Draw a smooth great-circle polyline through the stops IN DAY ORDER.
+    // Deliberately NOT a Mapbox Directions (driving) route: stops are often
+    // far apart and the driving profile would snake along roads and can
+    // detour across a border (e.g. a Laos-only trip veering into Vietnam).
+    // A great-circle sequence line reads as "this then that" without
+    // pretending to be a road you'd drive.
+    const line = greatCirclePath(stops);
+    lineSrc.setData({
+      type: "FeatureCollection",
+      features:
+        line.length >= 2
+          ? [{ type: "Feature", geometry: { type: "LineString", coordinates: line }, properties: {} }]
+          : [],
     });
-    return () => {
-      cancelled = true;
-    };
   }, [itinerary]);
 
   if (!hasMapboxToken()) {
