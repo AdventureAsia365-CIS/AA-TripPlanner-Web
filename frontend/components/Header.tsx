@@ -9,22 +9,17 @@ export default function Header() {
       style={{ height: "56px", flexShrink: 0 }}
     >
       <div className="flex items-center gap-3">
-        {/* Gold compass-dot mark */}
-        <span
-          aria-hidden
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-aa-ink"
-        >
-          <span className="h-3 w-3 rounded-full bg-aa-gold" />
-        </span>
-        <div className="leading-tight">
-          <div className="flex items-baseline gap-2">
-            <span className="text-[15px] font-semibold tracking-tight text-aa-ink">
-              Adventure Asia
-            </span>
-            <span className="hidden text-[11px] font-medium uppercase tracking-[0.18em] text-aa-gold sm:inline">
-              Trip Planner
-            </span>
-          </div>
+        {/* Official Adventure Asia logo */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/brand/logo.png"
+          alt="Adventure Asia"
+          className="h-9 w-auto"
+        />
+        <div className="hidden leading-tight sm:block">
+          <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-aa-gold">
+            Trip Planner
+          </span>
           <p className="hidden text-[11px] text-aa-muted md:block">
             Discreet executive adventures, crafted day by day
           </p>

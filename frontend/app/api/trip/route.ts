@@ -6,6 +6,36 @@ const TRIP_API_URL = process.env.TRIP_API_URL ?? "";
 // Shared secret the Lambdas verify (X-TripPlanner-Key). Server-side only.
 const TRIPPLANNER_API_KEY = process.env.TRIPPLANNER_API_KEY ?? "";
 
+function tripHeaders(): Record<string, string> {
+  const h: Record<string, string> = { "content-type": "application/json" };
+  if (TRIPPLANNER_API_KEY) h["x-tripplanner-key"] = TRIPPLANNER_API_KEY;
+  return h;
+}
+
+// GET /api/trip?trip_id=... — fetch the current itinerary for a trip, used to
+// restore a guest's trip after a page reload (trip_id persisted client-side).
+export async function GET(req: NextRequest) {
+  if (!TRIP_API_URL) {
+    return NextResponse.json(
+      { error: "TRIP_API_URL not configured" },
+      { status: 503 },
+    );
+  }
+  const tripId = encodeURIComponent(req.nextUrl.searchParams.get("trip_id") ?? "");
+  if (!tripId) {
+    return NextResponse.json({ error: "trip_id required" }, { status: 400 });
+  }
+  const upstream = await fetch(`${TRIP_API_URL}/trip/${tripId}`, {
+    method: "GET",
+    headers: tripHeaders(),
+  });
+  const text = await upstream.text();
+  return new NextResponse(text, {
+    status: upstream.status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
+}
+
 export async function POST(req: NextRequest) {
   if (!TRIP_API_URL) {
     return NextResponse.json(
@@ -49,12 +79,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "unknown op" }, { status: 400 });
   }
 
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  if (TRIPPLANNER_API_KEY) headers["x-tripplanner-key"] = TRIPPLANNER_API_KEY;
-
   const upstream = await fetch(`${TRIP_API_URL}${path}`, {
     method,
-    headers,
+    headers: tripHeaders(),
     body: JSON.stringify(payload),
   });
   const text = await upstream.text();

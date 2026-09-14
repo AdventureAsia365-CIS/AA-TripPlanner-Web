@@ -4,12 +4,18 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import * as api from "./api";
-import type { BrowseFilters, DestinationPin, ItineraryDay } from "./types";
+import type {
+  BrowseFilters,
+  CountryOption,
+  DestinationPin,
+  ItineraryDay,
+} from "./types";
 
 // Guest identity: a random session + trip id, held in memory only (guests
 // are not persisted — lost on tab close, per requirements).
@@ -34,6 +40,8 @@ interface TripState {
   searchQuery: string;
   searchResults: DestinationPin[] | null;
   searching: boolean;
+  // Countries that actually have components (for the country-first filter).
+  countries: CountryOption[];
   setFilters: (f: BrowseFilters) => void;
   runSearch: (q: string) => Promise<void>;
   clearSearch: () => void;
@@ -48,16 +56,45 @@ interface TripState {
 
 const TripContext = createContext<TripState | null>(null);
 
+const STORAGE_KEY = "aa-tripplanner:ids";
+
+// Persist the guest session + trip id so a reload restores the same trip
+// (the backend keeps the event log by trip_id). Falls back to fresh ids if
+// storage is unavailable (SSR, privacy mode).
+function loadOrCreateIds(): { sessionId: string; tripId: string } {
+  if (typeof window !== "undefined") {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.sessionId && parsed?.tripId) return parsed;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  const ids = { sessionId: randomId(), tripId: randomId() };
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+    } catch {
+      /* ignore */
+    }
+  }
+  return ids;
+}
+
 export function TripProvider({ children }: { children: React.ReactNode }) {
   const idsRef = useRef<{ sessionId: string; tripId: string }>();
   if (!idsRef.current) {
-    idsRef.current = { sessionId: randomId(), tripId: randomId() };
+    idsRef.current = loadOrCreateIds();
   }
   const { sessionId, tripId } = idsRef.current;
 
   const [itinerary, setItinerary] = useState<ItineraryDay[]>([]);
   const [filters, setFilters] = useState<BrowseFilters>({});
   const [status, setStatus] = useState<string>("draft");
+  const [countries, setCountries] = useState<CountryOption[]>([]);
   const [narration, setNarration] = useState<string>("");
   const [narrating, setNarrating] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -72,6 +109,32 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     () => new Set(itinerary.map((d) => d.component_id)),
     [itinerary],
   );
+
+  // Load the country list once (for the country-first filter dropdown).
+  useEffect(() => {
+    let active = true;
+    api.fetchCountries().then((cs) => {
+      if (active) setCountries(cs);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Restore a previously-built trip on mount (persisted trip_id). The backend
+  // rebuilds the itinerary from its event log, so a reload brings it back.
+  useEffect(() => {
+    let active = true;
+    api.fetchTrip(tripId).then((res) => {
+      if (active && res?.itinerary && res.itinerary.length > 0) {
+        setItinerary(res.itinerary);
+        if (res.status) setStatus(res.status);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [tripId]);
 
   const add = useCallback(
     async (componentId: string) => {
@@ -167,6 +230,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     searchQuery,
     searchResults,
     searching,
+    countries,
     setFilters,
     runSearch,
     clearSearch,

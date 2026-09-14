@@ -1,6 +1,7 @@
 // Thin client that talks to the BFF routes (never the Lambdas directly).
 import type {
   BrowseFilters,
+  CountryOption,
   DestinationDetail,
   DestinationPin,
   ItineraryDay,
@@ -38,6 +39,13 @@ export async function fetchDestination(
   return res.json();
 }
 
+export async function fetchCountries(): Promise<CountryOption[]> {
+  const res = await fetch(`/api/browse?resource=countries`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.countries ?? [];
+}
+
 export async function search(
   q: string,
   filters: BrowseFilters,
@@ -55,6 +63,12 @@ interface TripResponse {
   trip_id: string;
   itinerary: ItineraryDay[];
   status?: string;
+}
+
+export async function fetchTrip(tripId: string): Promise<TripResponse | null> {
+  const res = await fetch(`/api/trip?trip_id=${encodeURIComponent(tripId)}`);
+  if (!res.ok) return null;
+  return res.json();
 }
 
 export async function addComponent(

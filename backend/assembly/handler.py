@@ -30,6 +30,7 @@ _COMPONENT_ITEM_RE = re.compile(r"^/trip/([^/]+)/components/([^/]+)$")
 _REORDER_RE = re.compile(r"^/trip/([^/]+)/reorder$")
 _SEND_RE = re.compile(r"^/trip/([^/]+)/send-to-advisor$")
 _NARRATE_RE = re.compile(r"^/trip/([^/]+)/narrate$")
+_TRIP_RE = re.compile(r"^/trip/([^/]+)$")
 
 _HEADERS = {"content-type": "application/json", "cache-control": "no-store"}
 
@@ -50,6 +51,14 @@ async def route(
     narrator: Optional[Any] = None,
 ) -> dict:
     sender = sender or notify_mod.LoggingSender()
+
+    # Read the current itinerary for a trip (used to restore a guest's trip
+    # after a page reload — the trip_id is persisted client-side).
+    m = _TRIP_RE.match(path)
+    if m and method == "GET":
+        trip_id = m.group(1)
+        itinerary = await events_mod.current_itinerary(conn, trip_id)
+        return _resp(200, {"trip_id": trip_id, "itinerary": itinerary})
 
     m = _COMPONENTS_RE.match(path)
     if m and method == "POST":
