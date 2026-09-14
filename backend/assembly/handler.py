@@ -180,7 +180,13 @@ async def _narrate(conn, itinerary: list[dict], narrate_fn) -> tuple[str, str]:
     'llm' (none authored), or 'mixed'.
     """
     tour_ids = [e.get("source_tour_id") for e in itinerary if e.get("source_tour_id")]
-    day_texts = await master_content.load_for_tours(conn, tour_ids)
+    try:
+        day_texts = await master_content.load_for_tours(conn, tour_ids)
+    except Exception:  # noqa: BLE001
+        # Reading authored itinerary text is a best-effort optimisation
+        # (it lives in a shared schema this role may not be granted). If it
+        # fails for any reason, fall back to LLM narration rather than 500.
+        day_texts = {}
     master_narr, missing = master_content.build_narration(itinerary, day_texts)
 
     # All days resolved from authored content — no Bedrock call at all.
