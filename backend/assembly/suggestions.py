@@ -33,6 +33,20 @@ class _Conn(Protocol):
 SUGGEST_LIMIT = 6
 
 
+def _parse_vector(raw: Any) -> list[float]:
+    """pgvector comes back from asyncpg as a text literal '[0.1,0.2,...]'
+    (no registered codec). Parse it into floats. Accepts an already-parsed
+    list too."""
+    if isinstance(raw, (list, tuple)):
+        return [float(x) for x in raw]
+    if isinstance(raw, str):
+        s = raw.strip().lstrip("[").rstrip("]")
+        if not s:
+            return []
+        return [float(p) for p in s.split(",")]
+    return []
+
+
 def _avg_vector_literal(vectors: list[list[float]]) -> Optional[str]:
     """Average a list of equal-length float vectors into a pgvector literal
     '[a,b,...]', or None if there's nothing to average."""
@@ -77,7 +91,10 @@ async def suggest(conn: _Conn, trip_id: str, limit: int = SUGGEST_LIMIT) -> dict
         """,
         pinned_component_ids,
     )
-    vectors = [list(r["embedding"]) for r in rows if r["embedding"] is not None]
+    vectors = [
+        _parse_vector(r["embedding"]) for r in rows if r["embedding"] is not None
+    ]
+    vectors = [v for v in vectors if v]
     countries = sorted({r["country"] for r in rows if r["country"]})
     taste = _avg_vector_literal(vectors)
     if taste is None:
