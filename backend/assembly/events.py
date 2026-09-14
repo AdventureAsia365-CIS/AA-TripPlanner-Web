@@ -75,6 +75,7 @@ async def _current_components(conn: _Conn, trip_id: str) -> list[dict]:
     comp_rows = await conn.fetch(
         """
         SELECT c.id, c.name, c.activity, c.duration_hint, c.text_extract,
+               c.source_tour_id, c.source_day_index,
                d.lat AS lat, d.lng AS lng
         FROM tripplanner.itinerary_components c
         JOIN shared.destinations d ON d.id = c.destination_id
@@ -141,6 +142,8 @@ async def current_itinerary(conn: _Conn, trip_id: str) -> list[dict]:
             "component_id": e["component_id"],
             "name": e.get("name"),
             "text_extract": e.get("text_extract", ""),
+            "source_tour_id": e.get("source_tour_id"),
+            "source_day_index": e.get("source_day_index"),
         }
         for e in itinerary
     ]

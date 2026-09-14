@@ -22,6 +22,7 @@ from typing import Any, Optional
 from backend import config
 from backend.assembly import agent as agent_mod
 from backend.assembly import events as events_mod
+from backend.assembly import master_content
 from backend.assembly import notify as notify_mod
 from backend.assembly import registration as reg_mod
 
@@ -145,11 +146,11 @@ async def route(
 
         narrate_fn = _resolve_narrator(mode, narrator)
         try:
-            narration = "".join(narrate_fn(itinerary))
+            narration, source = await _narrate(conn, itinerary, narrate_fn)
         except Exception as e:  # noqa: BLE001 — surface Bedrock failure as 502
             return _resp(502, {"error": "narration_failed", "detail": str(e)})
 
-        return _resp(200, {"trip_id": trip_id, "mode": mode,
+        return _resp(200, {"trip_id": trip_id, "mode": mode, "source": source,
                            "narration": narration, "itinerary": itinerary})
 
     return _resp(404, {"error": "not found"})
@@ -162,6 +163,56 @@ def _resolve_narrator(mode: str, narrator: Optional[Any]):
     if narrator is not None:
         return narrator
     return agent_mod.renarrate if mode == "renarrate" else agent_mod.compose
+
+
+async def _narrate(conn, itinerary: list[dict], narrate_fn) -> tuple[str, str]:
+    """Build day-by-day narration, preferring AA's authored master itinerary
+    text over an LLM rewrite.
+
+    Strategy:
+      1. Look up authored per-day text from published_tours.aa_itineraries
+         (via source_tour_id + source_day_index).
+      2. Days with authored text use it directly (no LLM call).
+      3. Only the remaining days (unstructured itineraries, etc.) are sent
+         to the LLM, then merged back in trip-day order.
+
+    Returns (narration, source) where source is 'master' (all days authored),
+    'llm' (none authored), or 'mixed'.
+    """
+    tour_ids = [e.get("source_tour_id") for e in itinerary if e.get("source_tour_id")]
+    day_texts = await master_content.load_for_tours(conn, tour_ids)
+    master_narr, missing = master_content.build_narration(itinerary, day_texts)
+
+    # All days resolved from authored content — no Bedrock call at all.
+    if not missing:
+        return master_narr, "master"
+
+    # Some (or all) days need the LLM. Narrate only the missing days, then
+    # merge with any authored lines, preserving trip-day order.
+    llm_text = "".join(narrate_fn(missing))
+    if not master_narr:
+        return llm_text, "llm"
+
+    merged = _merge_by_day(master_narr, llm_text)
+    return merged, "mixed"
+
+
+def _merge_by_day(master_narr: str, llm_narr: str) -> str:
+    """Merge two 'Day N: ...' blocks into one, ordered by day number.
+    Master lines win if a day appears in both."""
+    import re
+
+    def to_map(text: str) -> dict[int, str]:
+        out: dict[int, str] = {}
+        for line in text.splitlines():
+            m = re.match(r"\s*Day\s*(\d+)\s*:", line, re.IGNORECASE)
+            if m:
+                out.setdefault(int(m.group(1)), line.strip())
+        return out
+
+    days = to_map(llm_narr)
+    days.update(to_map(master_narr))  # master overrides
+    return "\n".join(days[d] for d in sorted(days))
 
 
 async def _is_registered(conn, session_id: str) -> bool:

@@ -35,6 +35,9 @@ interface TripState {
   inTripComponentIds: Set<string>;
   narration: string;
   narrating: boolean;
+  // Where the narration came from: 'master' (AA's authored itinerary text),
+  // 'llm' (AI-written), 'mixed', or "" before any narrate call.
+  narrationSource: string;
   // Semantic search: when searchResults is non-null the map shows this
   // ranked set instead of tiles-by-bounds; null means "browse mode".
   searchQuery: string;
@@ -96,6 +99,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<string>("draft");
   const [countries, setCountries] = useState<CountryOption[]>([]);
   const [narration, setNarration] = useState<string>("");
+  const [narrationSource, setNarrationSource] = useState<string>("");
   const [narrating, setNarrating] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchResults, setSearchResults] = useState<DestinationPin[] | null>(
@@ -190,7 +194,10 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
       setNarrating(true);
       try {
         const res = await api.narrate(tripId, sessionId, mode);
-        if (res.ok) setNarration(res.narration);
+        if (res.ok) {
+          setNarration(res.narration);
+          setNarrationSource(res.source ?? "");
+        }
       } finally {
         setNarrating(false);
       }
@@ -227,6 +234,7 @@ export function TripProvider({ children }: { children: React.ReactNode }) {
     inTripComponentIds,
     narration,
     narrating,
+    narrationSource,
     searchQuery,
     searchResults,
     searching,

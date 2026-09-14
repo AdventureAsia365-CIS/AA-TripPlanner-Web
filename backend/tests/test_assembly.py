@@ -11,7 +11,15 @@ import json
 import pytest
 
 from backend import config
-from backend.assembly import agent, events, handler, notify, registration, sequencing
+from backend.assembly import (
+    agent,
+    events,
+    handler,
+    master_content,
+    notify,
+    registration,
+    sequencing,
+)
 
 
 # --- sequencing -------------------------------------------------------------
@@ -254,6 +262,38 @@ def test_renarrate_preserves_given_order_in_prompt():
     list(agent.renarrate(itinerary, invoker=capture_invoker))
     user_msg = captured["body"]["messages"][0]["content"]
     assert user_msg.index("Day 1: Hoi An") < user_msg.index("Day 2: Hanoi")
+
+
+# --- master content (authored aa_itineraries) -------------------------------
+
+def test_parse_days_handles_format_variants():
+    block = (
+        "Day 1 — Arrival in Vientiane: Mekong Riverfront. On arrival, relax.\n"
+        "Day 02: Discover Anuradhapura's Pagodas. Drive to the ancient city.\n"
+        "DAY 3 - Kandy. Visit the Temple of the Tooth."
+    )
+    days = master_content.parse_days(block)
+    assert set(days) == {1, 2, 3}
+    assert "Mekong Riverfront" in days[1]
+    assert "Anuradhapura" in days[2]
+
+
+def test_parse_days_unstructured_returns_empty():
+    assert master_content.parse_days("A lovely trip with no day markers.") == {}
+
+
+def test_build_narration_prefers_master_and_flags_missing():
+    itinerary = [
+        {"day": 1, "name": "A", "source_tour_id": "t1", "source_day_index": 6},
+        {"day": 2, "name": "B", "source_tour_id": "t1", "source_day_index": 7},
+    ]
+    day_texts = {("t1", 6): "Day 6 — Old town: wander the streets."}
+    narration, missing = master_content.build_narration(itinerary, day_texts)
+    # authored day relabelled to the trip's day number, source header stripped
+    assert narration.startswith("Day 1: Old town: wander the streets.")
+    assert "Day 6" not in narration
+    # the day with no authored text is reported as missing (LLM fallback)
+    assert [m["day"] for m in missing] == [2]
 
 
 # --- handler routing --------------------------------------------------------

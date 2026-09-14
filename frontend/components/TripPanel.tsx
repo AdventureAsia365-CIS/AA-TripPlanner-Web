@@ -71,6 +71,7 @@ export default function TripPanel() {
     status,
     narration,
     narrating,
+    narrationSource,
     remove,
     reorder,
     narrate,
@@ -82,6 +83,10 @@ export default function TripPanel() {
   const [sentMsg, setSentMsg] = useState<string | null>(null);
   // Per-leg travel estimates between consecutive days (index i = day i -> i+1).
   const [legs, setLegs] = useState<RouteLeg[]>([]);
+  // How many narration day-blocks are revealed so far — drives a light
+  // "typing" reveal. The narration itself arrives in one response (mostly
+  // AA's authored text, so instant); this just animates it in for polish.
+  const [revealCount, setRevealCount] = useState(0);
 
   // Recompute travel legs whenever the ordered set of geocoded stops changes.
   // Keyed on the id+coord sequence so a pure re-render doesn't refetch.
@@ -105,6 +110,25 @@ export default function TripPanel() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [legKey]);
+
+  // Progressive reveal of narration blocks. Resets when the narration text
+  // changes, then ticks up to the block count.
+  const narrationBlocks = narration ? parseNarration(narration) : [];
+  useEffect(() => {
+    if (!narration) {
+      setRevealCount(0);
+      return;
+    }
+    setRevealCount(0);
+    const total = parseNarration(narration).length;
+    let n = 0;
+    const id = setInterval(() => {
+      n += 1;
+      setRevealCount(n);
+      if (n >= total) clearInterval(id);
+    }, 180);
+    return () => clearInterval(id);
+  }, [narration]);
 
   const totalKm = legs.reduce((s, l) => s + l.distanceKm, 0);
 
@@ -368,14 +392,32 @@ export default function TripPanel() {
             {/* AI narration — proposes connective day-by-day copy. The
                 customer's chosen order is always respected. */}
             <div className="mt-4 rounded-xl border border-aa-line bg-white p-3">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-aa-ink">
-                  Day-by-day narration
-                </p>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <p className="text-xs font-semibold text-aa-ink">
+                    Day-by-day narration
+                  </p>
+                  {narration && narrationSource === "master" && (
+                    <span
+                      title="Straight from Adventure Asia's own tour itineraries"
+                      className="rounded-full bg-aa-gold-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-aa-gold-dark"
+                    >
+                      AA itinerary
+                    </span>
+                  )}
+                  {narration && narrationSource === "mixed" && (
+                    <span
+                      title="Mostly AA's own itinerary text, with AI filling any gaps"
+                      className="rounded-full bg-aa-gold-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-aa-gold-dark"
+                    >
+                      AA + AI
+                    </span>
+                  )}
+                </div>
                 <button
                   onClick={() => narrate("compose")}
                   disabled={narrating}
-                  className="aa-focus rounded-lg border border-aa-gold px-2.5 py-1 text-xs font-semibold text-aa-gold-dark transition hover:bg-aa-gold-soft disabled:opacity-50"
+                  className="aa-focus shrink-0 rounded-lg border border-aa-gold px-2.5 py-1 text-xs font-semibold text-aa-gold-dark transition hover:bg-aa-gold-soft disabled:opacity-50"
                 >
                   {narrating
                     ? "Composing…"
@@ -386,7 +428,7 @@ export default function TripPanel() {
               </div>
               {narration ? (
                 <div className="mt-2.5 space-y-2.5">
-                  {parseNarration(narration).map((b, i) => (
+                  {narrationBlocks.slice(0, revealCount).map((b, i) => (
                     <div key={i} className="flex gap-2.5">
                       {b.day !== null && (
                         <span className="mt-0.5 inline-flex h-5 shrink-0 items-center rounded-full bg-aa-gold-soft px-2 text-[10px] font-bold uppercase tracking-wide text-aa-gold-dark">
@@ -401,7 +443,8 @@ export default function TripPanel() {
                 </div>
               ) : (
                 <p className="mt-2 text-[11px] text-aa-muted">
-                  Let AI write a warm intro for each day, in your chosen order.
+                  We&apos;ll pull each day&apos;s story from Adventure
+                  Asia&apos;s own tour itineraries, in your chosen order.
                 </p>
               )}
             </div>
