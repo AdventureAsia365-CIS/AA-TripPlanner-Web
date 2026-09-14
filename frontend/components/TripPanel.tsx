@@ -2,9 +2,42 @@
 
 import { useEffect, useState } from "react";
 import { useTrip } from "@/lib/useTrip";
-import { fetchRouteLegs, formatLeg, type RouteLeg } from "@/lib/mapbox";
+import { fetchRouteLegs, formatLeg, haversineKm, type RouteLeg } from "@/lib/mapbox";
+import { COUNTRY_GATEWAY, type Gateway } from "@/lib/types";
 
 const LONG_TRIP_WARN_DAYS = 25;
+
+// Flatten all known gateways once; each stop finds its nearest gateway across
+// all countries, so we don't need a country field on the itinerary.
+const ALL_GATEWAYS: Gateway[] = Object.values(COUNTRY_GATEWAY).flat();
+
+// Map each gateway IATA back to its country, for a "countries visited" count.
+const IATA_TO_COUNTRY: Record<string, string> = Object.entries(
+  COUNTRY_GATEWAY,
+).reduce<Record<string, string>>((acc, [country, gws]) => {
+  for (const gw of gws) acc[gw.iata] = country;
+  return acc;
+}, {});
+
+// Nearest gateway airport to a [lng,lat] stop, with the transfer distance.
+function nearestGateway(
+  coord: [number, number],
+): { gw: Gateway; km: number } | null {
+  let best: { gw: Gateway; km: number } | null = null;
+  for (const gw of ALL_GATEWAYS) {
+    const km = haversineKm(coord, [gw.lng, gw.lat]);
+    if (!best || km < best.km) best = { gw, km };
+  }
+  return best;
+}
+
+// A short transfer hint based on how far the gateway is from the stop.
+function transferHint(km: number): string {
+  if (km < 15) return "airport is right here";
+  if (km < 120) return "short private transfer";
+  if (km < 400) return "a domestic hop or scenic drive";
+  return "a domestic flight";
+}
 
 interface NarrationBlock {
   day: number | null;
@@ -73,6 +106,32 @@ export default function TripPanel() {
   }, [legKey]);
 
   const totalKm = legs.reduce((s, l) => s + l.distanceKm, 0);
+
+  // Arrival (fly into the gateway nearest the first stop) and departure (fly
+  // out from the gateway nearest the last stop). Purely informative — an
+  // advisor arranges the real flights.
+  const geoStops = itinerary.filter(
+    (d) => typeof d.lat === "number" && typeof d.lng === "number",
+  );
+  const arrival =
+    geoStops.length > 0
+      ? nearestGateway([geoStops[0].lng as number, geoStops[0].lat as number])
+      : null;
+  const lastStop = geoStops[geoStops.length - 1];
+  const departure =
+    geoStops.length > 0
+      ? nearestGateway([lastStop.lng as number, lastStop.lat as number])
+      : null;
+
+  // Countries visited: infer from each stop's nearest gateway country.
+  const countriesVisited = new Set(
+    geoStops
+      .map((d) => {
+        const g = nearestGateway([d.lng as number, d.lat as number]);
+        return g ? IATA_TO_COUNTRY[g.gw.iata] : undefined;
+      })
+      .filter(Boolean) as string[],
+  );
 
   const onDrop = async (index: number) => {
     if (dragIndex === null || dragIndex === index) return;
@@ -174,6 +233,32 @@ export default function TripPanel() {
       ) : (
         <>
           <div className="flex-1 overflow-y-auto px-4 py-3">
+            {/* Trip summary: at-a-glance overview of the draft. */}
+            <div className="mb-3 grid grid-cols-3 gap-2">
+              <div className="rounded-xl border border-aa-line bg-white p-2.5 text-center">
+                <p className="text-base font-bold text-aa-ink">{itinerary.length}</p>
+                <p className="text-[10px] uppercase tracking-wide text-aa-muted">
+                  {itinerary.length > 1 ? "Days" : "Day"}
+                </p>
+              </div>
+              <div className="rounded-xl border border-aa-line bg-white p-2.5 text-center">
+                <p className="text-base font-bold text-aa-ink">
+                  {countriesVisited.size || 1}
+                </p>
+                <p className="text-[10px] uppercase tracking-wide text-aa-muted">
+                  {countriesVisited.size > 1 ? "Countries" : "Country"}
+                </p>
+              </div>
+              <div className="rounded-xl border border-aa-line bg-white p-2.5 text-center">
+                <p className="text-base font-bold text-aa-ink">
+                  {totalKm > 0 ? `~${Math.round(totalKm)}` : "—"}
+                </p>
+                <p className="text-[10px] uppercase tracking-wide text-aa-muted">
+                  km travel
+                </p>
+              </div>
+            </div>
+
             {tooLong && (
               <div
                 role="alert"
@@ -181,6 +266,24 @@ export default function TripPanel() {
               >
                 This trip is {itinerary.length} days — quite long. You can keep
                 adding, but consider trimming for a smoother journey.
+              </div>
+            )}
+
+            {/* Arrival: fly into the nearest gateway, then transfer to day 1. */}
+            {arrival && (
+              <div className="mb-2 flex items-start gap-3 rounded-xl border border-dashed border-aa-line bg-aa-sand/50 p-3">
+                <span aria-hidden className="mt-0.5 text-lg">✈️</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-aa-ink">
+                    Getting there
+                  </p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-aa-muted">
+                    Fly into <span className="font-medium text-aa-ink">{arrival.gw.city} ({arrival.gw.iata})</span>
+                    , then {transferHint(arrival.km)}
+                    {arrival.km >= 15 && <> (~{Math.round(arrival.km)} km)</>} to your
+                    first stop.
+                  </p>
+                </div>
               </div>
             )}
 
@@ -238,8 +341,26 @@ export default function TripPanel() {
                 </li>
               ))}
             </ol>
+
+            {/* Departure: transfer from the last stop to its nearest gateway. */}
+            {departure && (
+              <div className="mt-2 flex items-start gap-3 rounded-xl border border-dashed border-aa-line bg-aa-sand/50 p-3">
+                <span aria-hidden className="mt-0.5 text-lg">🛫</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-aa-ink">Heading home</p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-aa-muted">
+                    After your last stop, {transferHint(departure.km)}
+                    {departure.km >= 15 && <> (~{Math.round(departure.km)} km)</>} back to{" "}
+                    <span className="font-medium text-aa-ink">{departure.gw.city} ({departure.gw.iata})</span>
+                    {" "}for your flight home.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <p className="mt-2 px-1 text-[11px] text-aa-muted">
-              Drag day cards to reorder. Travel times are driving estimates.
+              Drag day cards to reorder. Travel times are driving estimates;
+              flights are arranged by your advisor.
             </p>
 
             {/* AI narration — proposes connective day-by-day copy. The

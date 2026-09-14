@@ -133,6 +133,41 @@ export const COUNTRY_ISO: Record<string, string> = {
   Pakistan: "PK",
 };
 
+// Main international gateway airports per country. Used to suggest how a
+// traveller gets to the first stop (fly into the gateway, then transfer) and
+// leaves from the last stop. When a country has more than one gateway we pick
+// the one nearest the relevant stop. Coordinates are [lng, lat].
+export interface Gateway {
+  iata: string;
+  city: string;
+  lng: number;
+  lat: number;
+}
+
+export const COUNTRY_GATEWAY: Record<string, Gateway[]> = {
+  Laos: [
+    { iata: "VTE", city: "Vientiane", lng: 102.563, lat: 17.988 },
+    { iata: "LPQ", city: "Luang Prabang", lng: 102.161, lat: 19.897 },
+  ],
+  "Sri Lanka": [{ iata: "CMB", city: "Colombo", lng: 79.884, lat: 7.181 }],
+  "South Korea": [
+    { iata: "ICN", city: "Seoul (Incheon)", lng: 126.451, lat: 37.469 },
+    { iata: "PUS", city: "Busan", lng: 128.938, lat: 35.179 },
+  ],
+  Nepal: [{ iata: "KTM", city: "Kathmandu", lng: 85.359, lat: 27.697 }],
+  Japan: [
+    { iata: "NRT", city: "Tokyo (Narita)", lng: 140.386, lat: 35.765 },
+    { iata: "KIX", city: "Osaka (Kansai)", lng: 135.244, lat: 34.427 },
+    { iata: "CTS", city: "Sapporo (New Chitose)", lng: 141.692, lat: 42.775 },
+    { iata: "FUK", city: "Fukuoka", lng: 130.451, lat: 33.586 },
+  ],
+  India: [
+    { iata: "DEL", city: "Delhi", lng: 77.103, lat: 28.556 },
+    { iata: "BOM", city: "Mumbai", lng: 72.868, lat: 19.089 },
+    { iata: "MAA", city: "Chennai", lng: 80.169, lat: 12.99 },
+  ],
+};
+
 // Emoji fallback per activity (used until brand icons are wired everywhere).
 export const ACTIVITY_ICON: Record<string, string> = {
   trekking: "🥾",
