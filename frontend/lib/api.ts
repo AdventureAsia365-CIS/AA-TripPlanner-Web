@@ -46,6 +46,17 @@ export async function fetchCountries(): Promise<CountryOption[]> {
   return data.countries ?? [];
 }
 
+export async function fetchByCountry(
+  country: string,
+): Promise<DestinationPin[]> {
+  const res = await fetch(
+    `/api/browse?resource=by-country&country=${encodeURIComponent(country)}`,
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.destinations ?? [];
+}
+
 export async function search(
   q: string,
   filters: BrowseFilters,

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { fetchTile } from "@/lib/api";
+import { fetchByCountry, fetchTile } from "@/lib/api";
 import { fetchRoute, hasMapboxToken, MAPBOX_TOKEN, tileIdFor } from "@/lib/mapbox";
 import type { DestinationPin } from "@/lib/types";
 import { useTrip } from "@/lib/useTrip";
@@ -251,10 +251,38 @@ export default function MapView() {
   // Re-query when filters change (browse mode only).
   useEffect(() => {
     if (searchResults) return; // filters re-apply via a fresh search instead
-    if (mapRef.current && mapRef.current.isStyleLoaded()) {
-      refreshVisibleTiles();
-    }
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    refreshVisibleTiles();
   }, [filters, refreshVisibleTiles, searchResults]);
+
+  // When a COUNTRY is picked (country-first filter), fly the map to that
+  // country and show its destinations — otherwise selecting a country only
+  // filters within the current viewport, which looks like "nothing happened".
+  useEffect(() => {
+    if (searchResults) return; // search takes precedence
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const country = filters.country;
+    if (!country) return; // cleared -> the filters effect above refreshes tiles
+
+    let cancelled = false;
+    fetchByCountry(country).then((pins) => {
+      if (cancelled || !mapRef.current) return;
+      // Respect other active filters (activity/intensity/season) by keeping
+      // only pins that also pass the tile query; simplest: show country pins
+      // and let a subsequent tile refresh (on moveend) reconcile.
+      setSourceData(pins);
+      if (pins.length > 0) {
+        const b = new mapboxgl.LngLatBounds();
+        for (const p of pins) b.extend([p.lng, p.lat]);
+        map.fitBounds(b, { padding: 80, maxZoom: 8, duration: 700 });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [filters.country, searchResults, setSourceData]);
 
   // Render semantic-search results (or return to tiles when cleared).
   useEffect(() => {

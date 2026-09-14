@@ -36,3 +36,32 @@ async def list_countries(*, pool: _Pool) -> dict:
             for r in rows
         ]
     }
+
+
+# All destinations in a country (no map-bounds filter), so the UI can fit the
+# map to a country when the user picks one from the country-first filter.
+COUNTRY_DESTINATIONS_SQL = """
+    SELECT d.id, d.name, d.lat, d.lng, COUNT(c.id) AS component_count
+    FROM shared.destinations d
+    JOIN tripplanner.itinerary_components c ON c.destination_id = d.id
+    WHERE d.country = $1
+    GROUP BY d.id, d.name, d.lat, d.lng
+    HAVING COUNT(c.id) > 0
+    ORDER BY component_count DESC
+"""
+
+
+async def destinations_in_country(country: str, *, pool: _Pool) -> dict:
+    rows = await pool.fetch(COUNTRY_DESTINATIONS_SQL, country)
+    return {
+        "destinations": [
+            {
+                "id": str(r["id"]),
+                "name": r["name"],
+                "lat": r["lat"],
+                "lng": r["lng"],
+                "component_count": r["component_count"],
+            }
+            for r in rows
+        ]
+    }

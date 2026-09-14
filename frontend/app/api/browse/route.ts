@@ -45,6 +45,9 @@ export async function GET(req: NextRequest) {
     upstreamPath = `/browse/search?${filters}`;
   } else if (resource === "countries") {
     upstreamPath = `/browse/countries`;
+  } else if (resource === "by-country") {
+    const country = q.get("country") ?? "";
+    upstreamPath = `/browse/by-country?country=${encodeURIComponent(country)}`;
   } else {
     return NextResponse.json({ error: "unknown resource" }, { status: 400 });
   }
