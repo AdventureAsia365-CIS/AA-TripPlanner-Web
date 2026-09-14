@@ -44,6 +44,70 @@ export interface BrowseFilters {
   season?: number;
 }
 
+export interface CountryOption {
+  country: string;
+  component_count: number;
+}
+
+// Regions mirror adventure.asia's own top-level grouping (Southeast / East /
+// South / Central Asia). Used to group the country dropdown so the country
+// filter reads like the official site. Countries not mapped fall under
+// "Other".
+export const REGION_OF: Record<string, string> = {
+  // Southeast Asia
+  Cambodia: "Southeast Asia",
+  Indonesia: "Southeast Asia",
+  Laos: "Southeast Asia",
+  Malaysia: "Southeast Asia",
+  Myanmar: "Southeast Asia",
+  Philippines: "Southeast Asia",
+  Singapore: "Southeast Asia",
+  Thailand: "Southeast Asia",
+  Vietnam: "Southeast Asia",
+  "Timor-Leste": "Southeast Asia",
+  Brunei: "Southeast Asia",
+  // East Asia
+  China: "East Asia",
+  Japan: "East Asia",
+  "South Korea": "East Asia",
+  Mongolia: "East Asia",
+  Taiwan: "East Asia",
+  // South Asia
+  India: "South Asia",
+  Nepal: "South Asia",
+  Bhutan: "South Asia",
+  "Sri Lanka": "South Asia",
+  Bangladesh: "South Asia",
+  Pakistan: "South Asia",
+  Maldives: "South Asia",
+  // Central Asia
+  Kazakhstan: "Central Asia",
+  Kyrgyzstan: "Central Asia",
+  Uzbekistan: "Central Asia",
+  Tajikistan: "Central Asia",
+  Turkmenistan: "Central Asia",
+};
+
+export const REGION_ORDER = [
+  "Southeast Asia",
+  "East Asia",
+  "South Asia",
+  "Central Asia",
+  "Other",
+] as const;
+
+// Emoji fallback per activity (used until brand icons are wired everywhere).
+export const ACTIVITY_ICON: Record<string, string> = {
+  trekking: "🥾",
+  cultural_heritage: "🏛️",
+  wildlife_nature: "🐾",
+  water_activities: "🌊",
+  culinary: "🍜",
+  wellness_relaxation: "🧘",
+  adventure_sport: "🪂",
+  local_immersion: "🫖",
+};
+
 export const ACTIVITIES = [
   "trekking",
   "cultural_heritage",

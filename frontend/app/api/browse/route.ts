@@ -43,6 +43,8 @@ export async function GET(req: NextRequest) {
   } else if (resource === "search") {
     filters.set("q", q.get("q") ?? "");
     upstreamPath = `/browse/search?${filters}`;
+  } else if (resource === "countries") {
+    upstreamPath = `/browse/countries`;
   } else {
     return NextResponse.json({ error: "unknown resource" }, { status: 400 });
   }

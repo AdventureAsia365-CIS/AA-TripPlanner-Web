@@ -147,3 +147,17 @@ async def test_route_method_not_allowed():
     pool = FakePool()
     resp = await h.route("POST", "/browse/tiles/22_103", {}, pool=pool)
     assert resp["statusCode"] == 405
+
+
+@pytest.mark.asyncio
+async def test_route_countries_returns_list_and_cache_headers():
+    pool = FakePool(fetch_rows=[
+        {"country": "Laos", "component_count": 120},
+        {"country": "Nepal", "component_count": 80},
+    ])
+    resp = await h.route("GET", "/browse/countries", {}, pool=pool)
+    assert resp["statusCode"] == 200
+    assert "max-age" in resp["headers"]["cache-control"]
+    body = json.loads(resp["body"])
+    assert body["countries"][0]["country"] == "Laos"
+    assert body["countries"][0]["component_count"] == 120

@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTrip } from "@/lib/useTrip";
-import { ACTIVITIES, INTENSITIES } from "@/lib/types";
+import {
+  ACTIVITIES,
+  ACTIVITY_ICON,
+  INTENSITIES,
+  REGION_OF,
+  REGION_ORDER,
+} from "@/lib/types";
+import type { CountryOption } from "@/lib/types";
 
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -15,17 +22,21 @@ function label(v: string): string {
   return v.replace(/_/g, " ");
 }
 
-// Compact activity icons (emoji keeps it dependency-free; swap for SVG later).
-const ACTIVITY_ICON: Record<string, string> = {
-  trekking: "🥾",
-  cultural_heritage: "🏛️",
-  wildlife_nature: "🐾",
-  water_activities: "🌊",
-  culinary: "🍜",
-  wellness_relaxation: "🧘",
-  adventure_sport: "🪂",
-  local_immersion: "🫖",
-};
+// Group countries by region (adventure.asia's own top-level grouping) so the
+// country-first dropdown reads like the official site.
+function groupByRegion(countries: CountryOption[]) {
+  const groups: Record<string, CountryOption[]> = {};
+  for (const c of countries) {
+    const region = REGION_OF[c.country] ?? "Other";
+    (groups[region] ??= []).push(c);
+  }
+  return REGION_ORDER.map((region) => ({
+    region,
+    items: (groups[region] ?? []).sort((a, b) =>
+      a.country.localeCompare(b.country),
+    ),
+  })).filter((g) => g.items.length > 0);
+}
 
 export default function FilterChips() {
   const {
@@ -35,12 +46,12 @@ export default function FilterChips() {
     clearSearch,
     searching,
     searchResults,
+    countries,
   } = useTrip();
   const [open, setOpen] = useState(true);
   const [text, setText] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
-  // Debounced semantic search. Empty text clears search (back to browse mode).
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
@@ -52,6 +63,8 @@ export default function FilterChips() {
     };
   }, [text, runSearch, clearSearch]);
 
+  const grouped = useMemo(() => groupByRegion(countries), [countries]);
+
   const toggleActivity = (a: string) =>
     setFilters({ ...filters, activity: filters.activity === a ? undefined : a });
 
@@ -62,6 +75,9 @@ export default function FilterChips() {
     (filters.country ? 1 : 0);
 
   const resultCount = searchResults?.length ?? null;
+  // Activity is a secondary refinement — invite the user to pick a country
+  // first (product requirement: country → then activity).
+  const activityStepEnabled = Boolean(filters.country);
 
   return (
     <div className="pointer-events-none absolute left-4 right-4 top-4 z-10 flex justify-start">
@@ -133,29 +149,86 @@ export default function FilterChips() {
 
         {open && (
           <div className="aa-animate-in border-t border-aa-line px-3 py-3">
-            {/* Activity chips */}
-            <div className="flex flex-wrap gap-1.5">
-              {ACTIVITIES.map((a) => {
-                const active = filters.activity === a;
-                return (
-                  <button
-                    key={a}
-                    onClick={() => toggleActivity(a)}
-                    aria-pressed={active}
-                    className={`aa-focus flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium capitalize transition ${
-                      active
-                        ? "border-aa-gold bg-aa-gold text-white shadow-aa-sm"
-                        : "border-aa-line bg-white text-aa-ink hover:border-aa-gold/60 hover:bg-aa-gold-soft"
-                    }`}
-                  >
-                    <span aria-hidden>{ACTIVITY_ICON[a] ?? "•"}</span>
-                    {label(a)}
-                  </button>
-                );
-              })}
+            {/* STEP 1 — Country (primary filter). Country first, then activity. */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-aa-ink text-[11px] font-bold text-white">
+                1
+              </span>
+              <label htmlFor="country-select" className="text-xs font-semibold text-aa-ink">
+                Country
+              </label>
+              <select
+                id="country-select"
+                aria-label="Country"
+                value={filters.country ?? ""}
+                onChange={(e) =>
+                  setFilters({ ...filters, country: e.target.value || undefined })
+                }
+                className="aa-focus min-w-[12rem] flex-1 rounded-lg border border-aa-line bg-white px-2.5 py-1.5 text-xs text-aa-ink"
+              >
+                <option value="">All countries</option>
+                {grouped.map((g) => (
+                  <optgroup key={g.region} label={g.region}>
+                    {g.items.map((c) => (
+                      <option key={c.country} value={c.country}>
+                        {c.country} ({c.component_count})
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              {filters.country && (
+                <button
+                  onClick={() => setFilters({ ...filters, country: undefined })}
+                  className="aa-focus rounded-lg px-2 py-1 text-xs font-medium text-aa-muted hover:text-aa-ink"
+                >
+                  Clear
+                </button>
+              )}
             </div>
 
-            {/* Selects */}
+            {/* STEP 2 — Activity (refines within the chosen country). */}
+            <div className="mt-3">
+              <div className="mb-1.5 flex items-center gap-2">
+                <span
+                  className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
+                    activityStepEnabled
+                      ? "bg-aa-ink text-white"
+                      : "bg-aa-line text-aa-muted"
+                  }`}
+                >
+                  2
+                </span>
+                <span className="text-xs font-semibold text-aa-ink">Activity</span>
+                {!activityStepEnabled && (
+                  <span className="text-[11px] text-aa-muted">
+                    (optional — or pick a country first)
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {ACTIVITIES.map((a) => {
+                  const active = filters.activity === a;
+                  return (
+                    <button
+                      key={a}
+                      onClick={() => toggleActivity(a)}
+                      aria-pressed={active}
+                      className={`aa-focus flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium capitalize transition ${
+                        active
+                          ? "border-aa-gold bg-aa-gold text-white shadow-aa-sm"
+                          : "border-aa-line bg-white text-aa-ink hover:border-aa-gold/60 hover:bg-aa-gold-soft"
+                      }`}
+                    >
+                      <span aria-hidden>{ACTIVITY_ICON[a] ?? "•"}</span>
+                      {label(a)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Extra refinements */}
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <select
                 aria-label="Intensity"
@@ -191,16 +264,6 @@ export default function FilterChips() {
                   </option>
                 ))}
               </select>
-
-              <input
-                aria-label="Country"
-                placeholder="Country"
-                value={filters.country ?? ""}
-                onChange={(e) =>
-                  setFilters({ ...filters, country: e.target.value || undefined })
-                }
-                className="aa-focus w-28 rounded-lg border border-aa-line bg-white px-2.5 py-1.5 text-xs text-aa-ink placeholder:text-aa-muted"
-              />
 
               {activeCount > 0 && (
                 <button

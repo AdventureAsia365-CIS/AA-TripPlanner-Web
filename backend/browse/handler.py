@@ -18,6 +18,7 @@ import re
 from typing import Any, Optional
 
 from backend import config
+from backend.browse import countries as countries_mod
 from backend.browse import destinations as dest_mod
 from backend.browse import tiles as tiles_mod
 from backend.browse import search as search_mod
@@ -27,6 +28,7 @@ from backend.browse.tiles import TileError
 _TILE_RE = re.compile(r"^/browse/tiles/([^/]+)$")
 _DEST_RE = re.compile(r"^/browse/destinations/([^/]+)$")
 _SEARCH_RE = re.compile(r"^/browse/search$")
+_COUNTRIES_RE = re.compile(r"^/browse/countries$")
 
 _CACHE_HEADERS = {
     "content-type": "application/json",
@@ -60,6 +62,10 @@ async def route(
             data = await tiles_mod.query_tile(m.group(1), filters, pool=pool)
         except TileError as e:
             return _resp(400, {"error": str(e)}, _NO_STORE_HEADERS)
+        return _resp(200, data, _CACHE_HEADERS)
+
+    if _COUNTRIES_RE.match(path):
+        data = await countries_mod.list_countries(pool=pool)
         return _resp(200, data, _CACHE_HEADERS)
 
     m = _DEST_RE.match(path)
