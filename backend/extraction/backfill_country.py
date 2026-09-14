@@ -35,21 +35,24 @@ from backend.extraction.country_normalize import normalize_country
 
 
 # Per-destination majority country from the tours its components came from.
+# Country lives on silver_aa_internal.raw_tours.country (the source with
+# known dirty values SRI-LANDKA/OKINAWA — hence country_normalize). It joins
+# to itinerary_components via the tour uuid (source_tour_id is text).
 SELECT_DEST_COUNTRY_SQL = """
     SELECT dest_id, country
     FROM (
         SELECT c.destination_id AS dest_id,
-               pt.country       AS country,
+               rt.country       AS country,
                COUNT(*)         AS n,
                ROW_NUMBER() OVER (
                    PARTITION BY c.destination_id
-                   ORDER BY COUNT(*) DESC, pt.country ASC
+                   ORDER BY COUNT(*) DESC, rt.country ASC
                ) AS rnk
         FROM tripplanner.itinerary_components c
-        JOIN gold_aa_internal.published_tours pt
-          ON pt.tour_id = c.source_tour_id
-        WHERE pt.country IS NOT NULL AND pt.country <> ''
-        GROUP BY c.destination_id, pt.country
+        JOIN silver_aa_internal.raw_tours rt
+          ON rt.tour_id::text = c.source_tour_id
+        WHERE rt.country IS NOT NULL AND rt.country <> ''
+        GROUP BY c.destination_id, rt.country
     ) ranked
     WHERE rnk = 1
 """
