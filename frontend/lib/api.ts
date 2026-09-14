@@ -140,7 +140,7 @@ export async function narrate(
   tripId: string,
   sessionId: string,
   mode: "compose" | "renarrate" = "compose",
-): Promise<{ ok: boolean; narration: string }> {
+): Promise<{ ok: boolean; narration: string; source: string }> {
   const res = await fetch("/api/trip", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -151,9 +151,13 @@ export async function narrate(
       mode,
     }),
   });
-  if (!res.ok) return { ok: false, narration: "" };
+  if (!res.ok) return { ok: false, narration: "", source: "" };
   const data = await res.json();
-  return { ok: true, narration: data.narration ?? "" };
+  return {
+    ok: true,
+    narration: data.narration ?? "",
+    source: data.source ?? "",
+  };
 }
 
 export async function sendToAdvisor(
