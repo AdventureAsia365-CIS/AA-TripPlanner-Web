@@ -96,6 +96,19 @@ export const REGION_ORDER = [
   "Other",
 ] as const;
 
+// Approximate country bounding boxes [west, south, east, north]. Used ONLY to
+// discard clearly mis-geocoded outliers when fitting the map to a country
+// (a known data issue: Mapbox limit=1 sometimes resolves a same-named place
+// on the wrong continent). Does not modify data; only keeps the camera sane.
+export const COUNTRY_BBOX: Record<string, [number, number, number, number]> = {
+  Laos: [100.0, 13.5, 108.0, 22.6],
+  "Sri Lanka": [79.5, 5.8, 82.0, 10.0],
+  "South Korea": [125.5, 33.0, 130.0, 38.7],
+  Nepal: [80.0, 26.3, 88.3, 30.5],
+  Japan: [122.0, 24.0, 146.0, 45.6],
+  India: [68.0, 6.5, 97.5, 35.7],
+};
+
 // Emoji fallback per activity (used until brand icons are wired everywhere).
 export const ACTIVITY_ICON: Record<string, string> = {
   trekking: "🥾",

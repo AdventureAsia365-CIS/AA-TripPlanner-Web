@@ -29,6 +29,7 @@ _TILE_RE = re.compile(r"^/browse/tiles/([^/]+)$")
 _DEST_RE = re.compile(r"^/browse/destinations/([^/]+)$")
 _SEARCH_RE = re.compile(r"^/browse/search$")
 _COUNTRIES_RE = re.compile(r"^/browse/countries$")
+_BY_COUNTRY_RE = re.compile(r"^/browse/by-country$")
 
 _CACHE_HEADERS = {
     "content-type": "application/json",
@@ -66,6 +67,15 @@ async def route(
 
     if _COUNTRIES_RE.match(path):
         data = await countries_mod.list_countries(pool=pool)
+        return _resp(200, data, _CACHE_HEADERS)
+
+    if _BY_COUNTRY_RE.match(path):
+        country = query.get("country")
+        if isinstance(country, list):
+            country = country[0] if country else None
+        if not country:
+            return _resp(400, {"error": "country required"}, _NO_STORE_HEADERS)
+        data = await countries_mod.destinations_in_country(country, pool=pool)
         return _resp(200, data, _CACHE_HEADERS)
 
     m = _DEST_RE.match(path)
