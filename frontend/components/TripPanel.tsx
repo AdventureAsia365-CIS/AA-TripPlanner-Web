@@ -31,12 +31,13 @@ function nearestGateway(
   return best;
 }
 
-// A short transfer hint based on how far the gateway is from the stop.
+// Transfer hint from the gateway airport to the stop, tuned for adventure
+// trips (overland / boat / domestic flight rather than city cabs).
 function transferHint(km: number): string {
-  if (km < 15) return "airport is right here";
-  if (km < 120) return "short private transfer";
-  if (km < 400) return "a domestic hop or scenic drive";
-  return "a domestic flight";
+  if (km < 15) return "you're right by the airport";
+  if (km < 120) return "a private 4WD or boat transfer";
+  if (km < 400) return "a scenic overland drive or a domestic hop";
+  return "a domestic flight, then an overland transfer";
 }
 
 interface NarrationBlock {
@@ -325,7 +326,7 @@ export default function TripPanel() {
 
                   {/* Travel connector to the next day. */}
                   {index < itinerary.length - 1 && legs[index] && (
-                    <div className="flex items-center gap-1.5 py-1 pl-3.5 text-[11px] text-aa-muted">
+                    <div className="flex flex-wrap items-center gap-x-1.5 py-1 pl-3.5 text-[11px] text-aa-muted">
                       <span aria-hidden className="text-aa-gold">↓</span>
                       <span>{formatLeg(legs[index])}</span>
                       {legs[index].estimated && (
@@ -359,8 +360,9 @@ export default function TripPanel() {
             )}
 
             <p className="mt-2 px-1 text-[11px] text-aa-muted">
-              Drag day cards to reorder. Travel times are driving estimates;
-              flights are arranged by your advisor.
+              Drag day cards to reorder. Distances are rough estimates and
+              travel modes are suggestions — your advisor arranges the real
+              transfers, boats and flights for an adventure route.
             </p>
 
             {/* AI narration — proposes connective day-by-day copy. The

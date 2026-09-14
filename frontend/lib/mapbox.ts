@@ -98,7 +98,27 @@ export async function fetchRouteLegs(
   }
 }
 
-// Human-friendly leg label, e.g. "120 km · ~2h" or "15 km · ~25 min".
+// Suggested travel mode between two stops, tuned for AA's adventure trips
+// (not city tours). Distance-based, since we don't have real routing:
+//   short  -> often a trek / boat / short 4WD run
+//   medium -> overland by 4WD, or a river/boat leg
+//   long   -> a scenic overland day, or a domestic flight for big jumps
+// Deliberately hedged ("likely") — an advisor confirms the real logistics.
+export interface TravelMode {
+  icon: string;
+  label: string;
+}
+
+export function suggestTravelMode(km: number): TravelMode {
+  if (km < 8) return { icon: "🥾", label: "on foot or a short transfer" };
+  if (km < 60) return { icon: "🚙", label: "4WD or boat transfer" };
+  if (km < 250) return { icon: "🚙", label: "overland by 4WD (a scenic drive)" };
+  if (km < 500) return { icon: "🚙", label: "a long overland day, or a domestic hop" };
+  return { icon: "✈️", label: "likely a domestic flight" };
+}
+
+// Human-friendly leg label with a mode hint, e.g.
+// "🚙 120 km · ~2h · 4WD or boat transfer".
 export function formatLeg(leg: RouteLeg): string {
   const km = Math.round(leg.distanceKm);
   const mins = Math.round(leg.durationMin);
@@ -110,35 +130,6 @@ export function formatLeg(leg: RouteLeg): string {
     const m = mins % 60;
     time = m === 0 ? `~${h}h` : `~${h}h ${m}m`;
   }
-  return `${km} km · ${time}`;
-}
-
-/**
- * Fetch a real road-following route through the given [lng,lat] waypoints
- * (in order) via the Mapbox Directions API (driving profile). Returns the
- * route geometry as an array of [lng,lat] coordinates, or null if the
- * request fails or no route exists (e.g. points not connected by road —
- * islands, cross-water). The caller falls back to a straight line on null.
- */
-export async function fetchRoute(
-  waypoints: [number, number][],
-): Promise<[number, number][] | null> {
-  if (!hasMapboxToken() || waypoints.length < 2) return null;
-  const pts = waypoints.slice(0, MAX_DIRECTIONS_WAYPOINTS);
-  const coords = pts.map((c) => `${c[0]},${c[1]}`).join(";");
-  const url =
-    `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}` +
-    `?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const route = data?.routes?.[0]?.geometry?.coordinates;
-    if (Array.isArray(route) && route.length >= 2) {
-      return route as [number, number][];
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  const mode = suggestTravelMode(leg.distanceKm);
+  return `${mode.icon} ${km} km · ${time} · ${mode.label}`;
 }
