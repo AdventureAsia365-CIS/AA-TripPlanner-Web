@@ -29,7 +29,7 @@ export interface RouteLeg {
 }
 
 // Haversine great-circle distance in km between two [lng,lat] points.
-function haversineKm(a: [number, number], b: [number, number]): number {
+export function haversineKm(a: [number, number], b: [number, number]): number {
   const R = 6371;
   const toRad = (d: number) => (d * Math.PI) / 180;
   const dLat = toRad(b[1] - a[1]);
