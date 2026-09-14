@@ -6,13 +6,14 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { fetchByCountry, fetchTile } from "@/lib/api";
 import { fetchRoute, hasMapboxToken, MAPBOX_TOKEN, tileIdFor } from "@/lib/mapbox";
 import type { DestinationPin } from "@/lib/types";
-import { COUNTRY_BBOX } from "@/lib/types";
+import { COUNTRY_BBOX, COUNTRY_ISO } from "@/lib/types";
 import { useTrip } from "@/lib/useTrip";
 import DestinationPopup from "./DestinationPopup";
 
 const SOURCE_ID = "destinations";
 const TRIP_LINE_SOURCE = "trip-line";
 const TRIP_STOP_SOURCE = "trip-stops";
+const COUNTRY_SOURCE = "country-boundaries";
 
 // Enumerate the integer 1° tiles covering the current map bounds.
 function tilesForBounds(b: mapboxgl.LngLatBounds): string[] {
@@ -109,6 +110,33 @@ export default function MapView() {
 
     map.on("load", () => {
       map.resize(); // ensure canvas matches container after first layout
+
+      // --- Selected-country highlight. Uses Mapbox's free country-boundaries
+      // tileset so the chosen country gets a soft gold fill + gold outline,
+      // making "I picked Laos" visually obvious (not just a camera move).
+      // Added first so it renders beneath the destination pins and trip path.
+      map.addSource(COUNTRY_SOURCE, {
+        type: "vector",
+        url: "mapbox://mapbox.country-boundaries-v1",
+      });
+      map.addLayer({
+        id: "country-highlight-fill",
+        type: "fill",
+        source: COUNTRY_SOURCE,
+        "source-layer": "country_boundaries",
+        // Start matching nothing; the country effect sets the real filter.
+        filter: ["==", ["get", "iso_3166_1"], "__none__"],
+        paint: { "fill-color": "#DB9628", "fill-opacity": 0.1 },
+      });
+      map.addLayer({
+        id: "country-highlight-line",
+        type: "line",
+        source: COUNTRY_SOURCE,
+        "source-layer": "country_boundaries",
+        filter: ["==", ["get", "iso_3166_1"], "__none__"],
+        paint: { "line-color": "#B87A1A", "line-width": 2, "line-opacity": 0.85 },
+      });
+
       map.addSource(SOURCE_ID, {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -264,8 +292,24 @@ export default function MapView() {
     if (searchResults) return; // search takes precedence
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
+
+    // Update the country highlight (gold fill/outline) to match the selection.
+    const setHighlight = (iso: string) => {
+      const f: mapboxgl.FilterSpecification = [
+        "==",
+        ["get", "iso_3166_1"],
+        iso,
+      ];
+      if (map.getLayer("country-highlight-fill")) map.setFilter("country-highlight-fill", f);
+      if (map.getLayer("country-highlight-line")) map.setFilter("country-highlight-line", f);
+    };
+
     const country = filters.country;
-    if (!country) return; // cleared -> the filters effect above refreshes tiles
+    if (!country) {
+      setHighlight("__none__"); // cleared -> remove highlight
+      return; // the filters effect above refreshes tiles
+    }
+    setHighlight(COUNTRY_ISO[country] ?? "__none__");
 
     let cancelled = false;
     fetchByCountry(country).then((pins) => {
