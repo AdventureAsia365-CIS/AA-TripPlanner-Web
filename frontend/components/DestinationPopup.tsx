@@ -104,46 +104,50 @@ export default function DestinationPopup({ destinationId, onClose }: Props) {
                     : "border-aa-line bg-white hover:border-aa-gold/40"
                 }`}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-aa-ink">{c.name}</p>
-                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] capitalize text-aa-muted">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-aa-sand px-2 py-0.5">
-                        <span aria-hidden>{ACTIVITY_ICON[c.activity] ?? "•"}</span>
-                        {label(c.activity)}
-                      </span>
-                      <span className="rounded-full bg-aa-sand px-2 py-0.5">
-                        {label(c.intensity_level)}
-                      </span>
-                      <span className="rounded-full bg-aa-sand px-2 py-0.5">
-                        {label(c.duration_hint)}
-                      </span>
-                    </p>
-                  </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-aa-ink">{c.name}</p>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] capitalize text-aa-muted">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-aa-sand px-2 py-0.5">
+                      <span aria-hidden>{ACTIVITY_ICON[c.activity] ?? "•"}</span>
+                      {label(c.activity)}
+                    </span>
+                    <span className="rounded-full bg-aa-sand px-2 py-0.5">
+                      {label(c.intensity_level)}
+                    </span>
+                    <span className="rounded-full bg-aa-sand px-2 py-0.5">
+                      {label(c.duration_hint)}
+                    </span>
+                  </p>
+                </div>
+                <p className="mt-1.5 text-xs leading-relaxed text-aa-ink-soft">
+                  {c.text_extract}
+                </p>
+                {/* Add/Remove on its own full-width row so it's always
+                    visible regardless of the component name length. */}
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  {inTrip && day !== null ? (
+                    <span className="flex items-center gap-1 text-[11px] font-semibold text-aa-gold-dark">
+                      <span aria-hidden>✓</span> In your trip — Day {day}
+                    </span>
+                  ) : (
+                    <span />
+                  )}
                   {inTrip ? (
                     <button
                       onClick={() => remove(c.id)}
-                      className="aa-focus shrink-0 rounded-lg border border-aa-line bg-white px-2.5 py-1 text-xs font-medium text-aa-muted hover:border-red-300 hover:text-red-600"
+                      className="aa-focus rounded-lg border border-aa-line bg-white px-3 py-1.5 text-xs font-medium text-aa-muted hover:border-red-300 hover:text-red-600"
                     >
                       Remove
                     </button>
                   ) : (
                     <button
                       onClick={() => add(c.id)}
-                      className="aa-focus shrink-0 rounded-lg bg-aa-gold px-3 py-1 text-xs font-semibold text-white shadow-aa-sm hover:bg-aa-gold-dark"
+                      className="aa-focus rounded-lg bg-aa-gold px-4 py-1.5 text-xs font-semibold text-white shadow-aa-sm hover:bg-aa-gold-dark"
                     >
-                      + Add
+                      + Add to trip
                     </button>
                   )}
                 </div>
-                <p className="mt-1.5 text-xs leading-relaxed text-aa-ink-soft">
-                  {c.text_extract}
-                </p>
-                {inTrip && day !== null && (
-                  <p className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-aa-gold-dark">
-                    <span aria-hidden>✓</span> In your trip — Day {day}
-                  </p>
-                )}
               </li>
             );
           })}

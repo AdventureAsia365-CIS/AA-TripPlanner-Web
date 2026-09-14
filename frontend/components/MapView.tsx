@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { fetchTile } from "@/lib/api";
-import { hasMapboxToken, MAPBOX_TOKEN, tileIdFor } from "@/lib/mapbox";
+import { fetchRoute, hasMapboxToken, MAPBOX_TOKEN, tileIdFor } from "@/lib/mapbox";
 import type { DestinationPin } from "@/lib/types";
 import { useTrip } from "@/lib/useTrip";
 import DestinationPopup from "./DestinationPopup";
 
 const SOURCE_ID = "destinations";
+const TRIP_LINE_SOURCE = "trip-line";
+const TRIP_STOP_SOURCE = "trip-stops";
 
 // Enumerate the integer 1° tiles covering the current map bounds.
 function tilesForBounds(b: mapboxgl.LngLatBounds): string[] {
@@ -27,7 +29,7 @@ function tilesForBounds(b: mapboxgl.LngLatBounds): string[] {
 }
 
 export default function MapView() {
-  const { filters, searchResults } = useTrip();
+  const { filters, searchResults, itinerary } = useTrip();
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const pinsRef = useRef<Map<string, DestinationPin>>(new Map());
@@ -149,6 +151,61 @@ export default function MapView() {
         },
       });
 
+      // --- Trip path: a dashed gold line connecting the pinned components in
+      // day order, plus numbered day markers. This is a straight-line visual
+      // path (no routing engine) — matches the "geographic heuristic" scope.
+      map.addSource(TRIP_LINE_SOURCE, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addSource(TRIP_STOP_SOURCE, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      // A soft white casing under a solid gold line reads cleanly over the
+      // map (like a highlighted route).
+      map.addLayer({
+        id: "trip-line-casing",
+        type: "line",
+        source: TRIP_LINE_SOURCE,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#ffffff", "line-width": 7, "line-opacity": 0.9 },
+      });
+      map.addLayer({
+        id: "trip-line",
+        type: "line",
+        source: TRIP_LINE_SOURCE,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#DB9628",
+          "line-width": 4,
+          "line-opacity": 0.95,
+        },
+      });
+      map.addLayer({
+        id: "trip-stop-dot",
+        type: "circle",
+        source: TRIP_STOP_SOURCE,
+        paint: {
+          "circle-color": "#DB9628",
+          "circle-radius": 12,
+          "circle-stroke-width": 2.5,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+      map.addLayer({
+        id: "trip-stop-label",
+        type: "symbol",
+        source: TRIP_STOP_SOURCE,
+        layout: {
+          "text-field": ["get", "day"],
+          "text-size": 12,
+          "text-font": ["DIN Offc Pro Bold", "Arial Unicode MS Bold"],
+          "text-allow-overlap": true,
+        },
+        paint: { "text-color": "#ffffff" },
+      });
+
       map.on("click", "unclustered", (e) => {
         const f = e.features?.[0];
         const id = f?.properties?.id as string | undefined;
@@ -209,6 +266,71 @@ export default function MapView() {
       map.fitBounds(b, { padding: 80, maxZoom: 9, duration: 600 });
     }
   }, [searchResults, refreshVisibleTiles, setSourceData]);
+
+  // Draw the trip path (day-ordered line + numbered stops) from the itinerary.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const lineSrc = map.getSource(TRIP_LINE_SOURCE) as
+      | mapboxgl.GeoJSONSource
+      | undefined;
+    const stopSrc = map.getSource(TRIP_STOP_SOURCE) as
+      | mapboxgl.GeoJSONSource
+      | undefined;
+    if (!lineSrc || !stopSrc) return;
+
+    // Only days that carry coordinates (the assembly API includes lat/lng).
+    const pts = itinerary
+      .filter((d) => typeof d.lat === "number" && typeof d.lng === "number")
+      .map((d) => ({ day: d.day, coord: [d.lng as number, d.lat as number] as [number, number] }));
+
+    stopSrc.setData({
+      type: "FeatureCollection",
+      features: pts.map((p) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: p.coord },
+        properties: { day: String(p.day) },
+      })),
+    });
+
+    // A line needs at least 2 distinct points; dedupe consecutive identical
+    // coords (several components can share one destination's coordinate).
+    const straight = pts.map((p) => p.coord).filter(
+      (c, i, arr) => i === 0 || c[0] !== arr[i - 1][0] || c[1] !== arr[i - 1][1],
+    );
+
+    const setLine = (coords: [number, number][]) =>
+      lineSrc.setData({
+        type: "FeatureCollection",
+        features:
+          coords.length >= 2
+            ? [{ type: "Feature", geometry: { type: "LineString", coordinates: coords }, properties: {} }]
+            : [],
+      });
+
+    // Draw the straight path immediately (instant feedback), then upgrade to
+    // a real road-following route from Mapbox Directions when it resolves.
+    // Falls back to the straight line if Directions fails (e.g. points not
+    // connected by road — islands/cross-water).
+    setLine(straight);
+    if (straight.length < 2) return;
+
+    let cancelled = false;
+    fetchRoute(straight).then((route) => {
+      if (cancelled) return;
+      const src = map.getSource(TRIP_LINE_SOURCE) as mapboxgl.GeoJSONSource | undefined;
+      if (!src) return;
+      if (route && route.length >= 2) {
+        src.setData({
+          type: "FeatureCollection",
+          features: [{ type: "Feature", geometry: { type: "LineString", coordinates: route }, properties: {} }],
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [itinerary]);
 
   if (!hasMapboxToken()) {
     return (

@@ -5,6 +5,31 @@ import { useTrip } from "@/lib/useTrip";
 
 const LONG_TRIP_WARN_DAYS = 25;
 
+interface NarrationBlock {
+  day: number | null;
+  text: string;
+}
+
+// Parse the LLM narration into per-day blocks. Handles the clean
+// "Day N: ..." format and defensively strips any leftover markdown
+// (**bold**, headings) from older/looser outputs.
+function parseNarration(raw: string): NarrationBlock[] {
+  const clean = raw.replace(/\*\*/g, "").replace(/^#+\s*/gm, "").trim();
+  const blocks: NarrationBlock[] = [];
+  // Split before each "Day N" marker (keep the marker with its text).
+  const parts = clean.split(/(?=Day\s+\d+\s*[:\-–])/i).map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return [{ day: null, text: clean }];
+  for (const p of parts) {
+    const m = p.match(/^Day\s+(\d+)\s*[:\-–]\s*(.*)$/is);
+    if (m) {
+      blocks.push({ day: Number(m[1]), text: m[2].trim() });
+    } else {
+      blocks.push({ day: null, text: p });
+    }
+  }
+  return blocks;
+}
+
 export default function TripPanel() {
   const {
     itinerary,
@@ -143,9 +168,20 @@ export default function TripPanel() {
                 </button>
               </div>
               {narration ? (
-                <p className="mt-2 whitespace-pre-line text-xs leading-relaxed text-aa-ink-soft">
-                  {narration}
-                </p>
+                <div className="mt-2.5 space-y-2.5">
+                  {parseNarration(narration).map((b, i) => (
+                    <div key={i} className="flex gap-2.5">
+                      {b.day !== null && (
+                        <span className="mt-0.5 inline-flex h-5 shrink-0 items-center rounded-full bg-aa-gold-soft px-2 text-[10px] font-bold uppercase tracking-wide text-aa-gold-dark">
+                          Day {b.day}
+                        </span>
+                      )}
+                      <p className="text-xs leading-relaxed text-aa-ink-soft">
+                        {b.text}
+                      </p>
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <p className="mt-2 text-[11px] text-aa-muted">
                   Let AI write a warm intro for each day, in your chosen order.
