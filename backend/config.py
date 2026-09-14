@@ -74,6 +74,17 @@ EMBED_DIM = 1536
 # --- Advisor notification (single config value, never inline) ---
 ADVISOR_NOTIFY_EMAIL = _get("ADVISOR_NOTIFY_EMAIL", "pqnghiep1354@gmail.com")
 
+# --- Master-content tenant (RLS on the shared gold schema) ---
+# gold_aa_internal.published_tours enforces row-level security by tenant
+# (policy: tenant_id = current_setting('app.tenant_id')). To read AA's
+# authored itinerary text the app sets this tenant id (SET LOCAL) before
+# querying. All active AA tours belong to this single tenant. Empty ->
+# skip setting it (local/tests), in which case RLS yields no rows and
+# narration falls back to the LLM.
+MASTER_CONTENT_TENANT_ID = _get(
+    "MASTER_CONTENT_TENANT_ID", "00000000-0000-0000-0000-000000000001"
+)
+
 # --- Edge shared-secret (API Gateway auth is NONE; the app checks this) ---
 # A shared secret the BFF must send in the X-TripPlanner-Key header. When
 # unset/empty (local dev, unit tests) the check is DISABLED — so nothing

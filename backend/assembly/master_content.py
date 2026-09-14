@@ -22,8 +22,13 @@ import re
 from typing import Any, Optional, Protocol
 
 
+from backend import config
+
+
 class _Conn(Protocol):
     async def fetch(self, query: str, *args: Any) -> Any: ...
+    async def execute(self, query: str, *args: Any) -> Any: ...
+    def transaction(self) -> Any: ...
 
 
 # Matches a day header at the start of a line, tolerant of the formats seen
@@ -67,15 +72,25 @@ async def load_for_tours(
     ids = [t for t in {str(t) for t in tour_ids} if t]
     if not ids:
         return {}
-    rows = await conn.fetch(
-        """
+    sql = """
         SELECT tour_id::text AS tour_id, aa_itineraries
         FROM gold_aa_internal.published_tours
         WHERE tour_id::text = ANY($1::text[])
           AND aa_itineraries IS NOT NULL
-        """,
-        ids,
-    )
+    """
+    # published_tours enforces tenant RLS. Set the AA tenant for the scope of
+    # this read only (SET LOCAL, inside a transaction, so it never leaks to
+    # other queries on a pooled connection). Without it RLS returns no rows
+    # and the caller falls back to the LLM.
+    tenant = config.MASTER_CONTENT_TENANT_ID
+    if tenant:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT set_config('app.tenant_id', $1, true)", tenant
+            )
+            rows = await conn.fetch(sql, ids)
+    else:
+        rows = await conn.fetch(sql, ids)
     result: dict[tuple[str, int], str] = {}
     for r in rows:
         tour_id = str(r["tour_id"])
