@@ -109,6 +109,30 @@ export const COUNTRY_BBOX: Record<string, [number, number, number, number]> = {
   India: [68.0, 6.5, 97.5, 35.7],
 };
 
+// ISO 3166-1 alpha-2 codes (uppercase) for the countries we operate in.
+// Used to highlight the selected country's polygon via Mapbox's free
+// `country-boundaries-v1` tileset (its `iso_3166_1` property is alpha-2).
+export const COUNTRY_ISO: Record<string, string> = {
+  Laos: "LA",
+  "Sri Lanka": "LK",
+  "South Korea": "KR",
+  Nepal: "NP",
+  Japan: "JP",
+  India: "IN",
+  Cambodia: "KH",
+  Vietnam: "VN",
+  Thailand: "TH",
+  Myanmar: "MM",
+  Indonesia: "ID",
+  Malaysia: "MY",
+  Philippines: "PH",
+  China: "CN",
+  Mongolia: "MN",
+  Bhutan: "BT",
+  Bangladesh: "BD",
+  Pakistan: "PK",
+};
+
 // Emoji fallback per activity (used until brand icons are wired everywhere).
 export const ACTIVITY_ICON: Record<string, string> = {
   trekking: "🥾",

@@ -110,12 +110,64 @@ async def _mapbox_in_country(
         r = await _try_geocode(http, cand, geo, use_country=True, use_bbox=False)
         if r:
             return r[0], r[1], "country"
-    for cand in candidates:
-        r = await _try_geocode(http, cand, geo, use_country=False, use_bbox=True)
-        if r:
-            return r[0], r[1], "proximity"
+    # NOTE: no proximity-without-country step. For countries whose bbox spills
+    # into a neighbour (Laos over NE Thailand), a proximity-only result can
+    # land back in the wrong country. The country=<iso> filter above is the
+    # only trustworthy signal; if it finds nothing, fall back to a jittered
+    # centroid (guaranteed in-country) rather than risk a wrong-country pin.
     cx, cy = geo["center"]
-    return cy, cx, "centroid"
+    jlat, jlng = _centroid_jitter(name, geo)
+    return cy + jlat, cx + jlng, "centroid"
+
+
+def _centroid_jitter(name: str, geo: dict) -> tuple[float, float]:
+    """A small, deterministic offset (~±0.4°, roughly ±40 km) from the country
+    centroid, derived from the place name. Spreads centroid-fallback pins so
+    they don't stack into one giant cluster, while staying inside the country.
+    Clamped so the jittered point stays within the country's bbox."""
+    import hashlib
+
+    h = hashlib.md5(name.encode("utf-8")).digest()
+    # Map two bytes to [-0.4, 0.4] degrees.
+    dlat = (h[0] / 255.0 - 0.5) * 0.8
+    dlng = (h[1] / 255.0 - 0.5) * 0.8
+    cx, cy = geo["center"]
+    w, s, e, n = geo["bbox"]
+    # Keep a margin so a jittered pin never lands on the border.
+    lat = min(max(cy + dlat, s + 0.3), n - 0.3)
+    lng = min(max(cx + dlng, w + 0.3), e - 0.3)
+    return lat - cy, lng - cx
+
+
+async def _reverse_country_iso(
+    http: httpx.AsyncClient, lat: float, lng: float
+) -> str | None:
+    """Reverse-geocode a coordinate to its ISO 3166-1 alpha-2 country code
+    (lowercase), or None on failure. Used to detect points that sit in the
+    WRONG country even though they fall inside our rectangular bbox — e.g.
+    a "Laos" place geocoded into north-east Thailand, which the Laos bbox
+    (a rectangle) still contains.
+    """
+    url = f"{config.MAPBOX_GEOCODING_URL}/{lng},{lat}.json"
+    params = {
+        "access_token": config.MAPBOX_GEOCODING_TOKEN,
+        "types": "country",
+        "limit": "1",
+    }
+    try:
+        resp = await http.get(url, params=params)
+        resp.raise_for_status()
+        feats = resp.json().get("features") or []
+        if not feats:
+            return None
+        code = feats[0].get("properties", {}).get("short_code")
+        if not code:
+            # Fall back to the feature id, e.g. "country.123" has no code;
+            # some responses carry short_code at the top level.
+            code = feats[0].get("short_code")
+        return code.lower() if isinstance(code, str) else None
+    except Exception:
+        return None
 
 
 async def main() -> None:
@@ -133,14 +185,26 @@ async def main() -> None:
             "WHERE country IS NOT NULL AND country <> ''"
         )
         outliers = []
+        checked = 0
         for r in rows:
             geo = COUNTRY_GEO.get(r["country"])
             if not geo:
                 continue  # country not mapped — skip
-            if not in_bbox(float(r["lat"]), float(r["lng"]), geo["bbox"]):
+            lat, lng = float(r["lat"]), float(r["lng"])
+            if not in_bbox(lat, lng, geo["bbox"]):
+                # Clearly outside the country's box — an outlier for sure.
+                outliers.append((r["id"], r["name"], r["country"], geo))
+                continue
+            # Inside the bbox, but the bbox is a rectangle and may spill into
+            # a neighbouring country (Laos's box covers NE Thailand and N
+            # Cambodia). Confirm the point is really in the right country by
+            # reverse-geocoding; only then trust it.
+            iso = await _reverse_country_iso(http, lat, lng)
+            checked += 1
+            if iso is not None and iso != geo["iso"]:
                 outliers.append((r["id"], r["name"], r["country"], geo))
         print(f"[regeocode] {len(outliers)} outliers to fix "
-              f"(of {len(rows)} with a country)")
+              f"(of {len(rows)} with a country; reverse-checked {checked})")
 
         fixed = 0
         by_method: dict[str, int] = {}
