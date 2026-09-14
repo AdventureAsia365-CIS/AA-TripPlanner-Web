@@ -114,15 +114,18 @@ export default function MapView() {
         cluster: true,
         clusterRadius: 50,
       });
+      // Colour system (deliberate, so the three roles never blur together):
+      //   ink  (#1F2933) = "browse / not yet picked"  -> clusters + single pins
+      //   gold (#DB9628) = "in your trip"             -> numbered day stops + route
       map.addLayer({
         id: "clusters",
         type: "circle",
         source: SOURCE_ID,
         filter: ["has", "point_count"],
         paint: {
-          "circle-color": "#DB9628",
+          "circle-color": "#1F2933",
           "circle-radius": ["step", ["get", "point_count"], 16, 10, 22, 30, 28],
-          "circle-opacity": 0.9,
+          "circle-opacity": 0.88,
           "circle-stroke-width": 2,
           "circle-stroke-color": "#ffffff",
         },
@@ -145,15 +148,16 @@ export default function MapView() {
         filter: ["!", ["has", "point_count"]],
         paint: {
           "circle-color": "#1F2933",
-          "circle-radius": 8,
-          "circle-stroke-width": 2.5,
+          "circle-radius": 7,
+          "circle-opacity": 0.85,
+          "circle-stroke-width": 2,
           "circle-stroke-color": "#ffffff",
         },
       });
 
-      // --- Trip path: a dashed gold line connecting the pinned components in
-      // day order, plus numbered day markers. This is a straight-line visual
-      // path (no routing engine) — matches the "geographic heuristic" scope.
+      // --- Trip path: a solid gold route (real roads via Directions, else a
+      // straight fallback) connecting the pinned components in day order, plus
+      // numbered day markers. Gold = "in your trip" (distinct from ink browse).
       map.addSource(TRIP_LINE_SOURCE, {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -177,7 +181,9 @@ export default function MapView() {
         source: TRIP_LINE_SOURCE,
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#DB9628",
+          // Deeper gold for the line so it stays distinct from the brighter
+          // gold day-stop dots that sit on top of it.
+          "line-color": "#B87A1A",
           "line-width": 4,
           "line-opacity": 0.95,
         },
@@ -188,8 +194,8 @@ export default function MapView() {
         source: TRIP_STOP_SOURCE,
         paint: {
           "circle-color": "#DB9628",
-          "circle-radius": 12,
-          "circle-stroke-width": 2.5,
+          "circle-radius": 13,
+          "circle-stroke-width": 3.5,
           "circle-stroke-color": "#ffffff",
         },
       });
