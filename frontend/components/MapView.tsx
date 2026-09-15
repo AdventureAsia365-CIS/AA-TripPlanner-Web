@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { fetchByCountry, fetchTile } from "@/lib/api";
-import { hasMapboxToken, MAPBOX_TOKEN, tileIdFor } from "@/lib/mapbox";
+import { fetchRouteLegs, hasMapboxToken, MAPBOX_TOKEN, tileIdFor } from "@/lib/mapbox";
 import type { DestinationPin } from "@/lib/types";
 import { COUNTRY_BBOX, COUNTRY_ISO } from "@/lib/types";
 import { useTrip } from "@/lib/useTrip";
@@ -12,6 +12,7 @@ import DestinationPopup from "./DestinationPopup";
 
 const SOURCE_ID = "destinations";
 const TRIP_LINE_SOURCE = "trip-line";
+const TRIP_FLIGHT_SOURCE = "trip-flight-line";
 const TRIP_STOP_SOURCE = "trip-stops";
 const COUNTRY_SOURCE = "country-boundaries";
 
@@ -54,18 +55,6 @@ function greatCircleSegment(
     out.push([toDeg(lon), toDeg(lat)]);
   }
   return out;
-}
-
-// Chain great-circle segments through an ordered list of stops.
-function greatCirclePath(stops: [number, number][]): [number, number][] {
-  if (stops.length < 2) return [];
-  const path: [number, number][] = [];
-  for (let i = 0; i < stops.length - 1; i++) {
-    const seg = greatCircleSegment(stops[i], stops[i + 1]);
-    if (i > 0) seg.shift(); // avoid duplicating the shared vertex
-    path.push(...seg);
-  }
-  return path;
 }
 
 // Enumerate the integer 1° tiles covering the current map bounds.
@@ -264,16 +253,30 @@ export default function MapView() {
         source: TRIP_LINE_SOURCE,
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          // Deeper gold for the line so it stays distinct from the brighter
-          // gold day-stop dots that sit on top of it. Dashed on purpose: this
-          // shows day-to-day SEQUENCE, not a drivable road route — stops are
-          // often hundreds of km apart (real transfers are flights/transfers
-          // an advisor arranges), so a solid road line would be misleading
-          // and can detour across borders.
+          // SOLID gold: this source only holds REAL road-following geometry
+          // (from Directions) for legs that are genuinely drivable.
           "line-color": "#B87A1A",
-          "line-width": 3,
-          "line-opacity": 0.9,
-          "line-dasharray": [2, 1.5],
+          "line-width": 4,
+          "line-opacity": 0.95,
+        },
+      });
+      // Flight/transfer legs: a faint dashed arc between stops that aren't
+      // sensibly road-connected. Deliberately understated so it doesn't read
+      // as a drawn road — it just links the day order.
+      map.addSource(TRIP_FLIGHT_SOURCE, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "trip-flight-line",
+        type: "line",
+        source: TRIP_FLIGHT_SOURCE,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#9AA5B1",
+          "line-width": 1.75,
+          "line-opacity": 0.7,
+          "line-dasharray": [1.5, 2],
         },
       });
       map.addLayer({
@@ -443,26 +446,56 @@ export default function MapView() {
       })),
     });
 
+    const flightSrc = map.getSource(TRIP_FLIGHT_SOURCE) as
+      | mapboxgl.GeoJSONSource
+      | undefined;
+
     // A line needs at least 2 distinct points; dedupe consecutive identical
     // coords (several components can share one destination's coordinate).
     const stops = pts.map((p) => p.coord).filter(
       (c, i, arr) => i === 0 || c[0] !== arr[i - 1][0] || c[1] !== arr[i - 1][1],
     );
 
-    // Draw a smooth great-circle polyline through the stops IN DAY ORDER.
-    // Deliberately NOT a Mapbox Directions (driving) route: stops are often
-    // far apart and the driving profile would snake along roads and can
-    // detour across a border (e.g. a Laos-only trip veering into Vietnam).
-    // A great-circle sequence line reads as "this then that" without
-    // pretending to be a road you'd drive.
-    const line = greatCirclePath(stops);
-    lineSrc.setData({
-      type: "FeatureCollection",
-      features:
-        line.length >= 2
-          ? [{ type: "Feature", geometry: { type: "LineString", coordinates: line }, properties: {} }]
-          : [],
+    if (stops.length < 2) {
+      lineSrc.setData({ type: "FeatureCollection", features: [] });
+      flightSrc?.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+
+    // Resolve each consecutive pair into a road leg (real road geometry) or a
+    // flight leg (dashed arc). Road legs draw the ACTUAL road; flight legs
+    // draw a faint arc — we never draw a straight line pretending to be a road.
+    let cancelled = false;
+    fetchRouteLegs(stops).then((legs) => {
+      if (cancelled || !legs) return;
+      const road = map.getSource(TRIP_LINE_SOURCE) as mapboxgl.GeoJSONSource | undefined;
+      const flight = map.getSource(TRIP_FLIGHT_SOURCE) as mapboxgl.GeoJSONSource | undefined;
+      if (!road || !flight) return;
+
+      const roadFeatures = legs
+        .filter((l) => l.mode === "road" && l.geometry.length >= 2)
+        .map((l) => ({
+          type: "Feature" as const,
+          geometry: { type: "LineString" as const, coordinates: l.geometry },
+          properties: {},
+        }));
+      const flightFeatures = legs
+        .filter((l) => l.mode === "flight")
+        .map((l) => ({
+          type: "Feature" as const,
+          geometry: {
+            type: "LineString" as const,
+            coordinates: greatCircleSegment(l.from, l.to),
+          },
+          properties: {},
+        }));
+
+      road.setData({ type: "FeatureCollection", features: roadFeatures });
+      flight.setData({ type: "FeatureCollection", features: flightFeatures });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [itinerary]);
 
   // Open a destination's popup when something (e.g. a suggestion click) asks

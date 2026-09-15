@@ -132,7 +132,11 @@ export default function TripPanel() {
     return () => clearInterval(id);
   }, [narration]);
 
-  const totalKm = legs.reduce((s, l) => s + l.distanceKm, 0);
+  // Total road distance — sum ONLY real road legs (flight legs have no
+  // meaningful driving distance). Also count how many legs are flights so we
+  // can label the total honestly ("road" km, not the whole journey).
+  const totalRoadKm = legs.reduce((s, l) => s + (l.distanceKm ?? 0), 0);
+  const hasFlightLeg = legs.some((l) => l.mode === "flight");
 
   // Arrival (fly into the gateway nearest the first stop) and departure (fly
   // out from the gateway nearest the last stop). Purely informative — an
@@ -192,9 +196,9 @@ export default function TripPanel() {
         <h2 className="text-base font-semibold text-aa-ink">Your trip</h2>
         {itinerary.length > 0 && (
           <div className="flex items-center gap-2">
-            {totalKm > 0 && (
+            {totalRoadKm > 0 && (
               <span className="text-xs text-aa-muted">
-                ~{Math.round(totalKm)} km total
+                ~{Math.round(totalRoadKm)} km by road{hasFlightLeg ? " +" : ""}
               </span>
             )}
             <span className="rounded-full bg-aa-ink px-2.5 py-0.5 text-xs font-semibold text-white">
@@ -278,10 +282,10 @@ export default function TripPanel() {
               </div>
               <div className="rounded-xl border border-aa-line bg-white p-2.5 text-center">
                 <p className="text-base font-bold text-aa-ink">
-                  {totalKm > 0 ? `~${Math.round(totalKm)}` : "—"}
+                  {totalRoadKm > 0 ? `~${Math.round(totalRoadKm)}` : "—"}
                 </p>
                 <p className="text-[10px] uppercase tracking-wide text-aa-muted">
-                  km travel
+                  km by road
                 </p>
               </div>
             </div>
@@ -307,7 +311,7 @@ export default function TripPanel() {
                   <p className="mt-0.5 text-[11px] leading-relaxed text-aa-muted">
                     Fly into <span className="font-medium text-aa-ink">{arrival.gw.city} ({arrival.gw.iata})</span>
                     , then {transferHint(arrival.km)}
-                    {arrival.km >= 15 && <> (~{Math.round(arrival.km)} km)</>} to your
+                    {arrival.km >= 15 && <> (about {Math.round(arrival.km)} km away)</>} to your
                     first stop.
                   </p>
                 </div>
@@ -350,19 +354,12 @@ export default function TripPanel() {
                     </button>
                   </div>
 
-                  {/* Travel connector to the next day. */}
+                  {/* Travel connector to the next day. Road legs show real
+                      driving distance/time; flight legs say so (no fake km). */}
                   {index < itinerary.length - 1 && legs[index] && (
                     <div className="flex flex-wrap items-center gap-x-1.5 py-1 pl-3.5 text-[11px] text-aa-muted">
                       <span aria-hidden className="text-aa-gold">↓</span>
                       <span>{formatLeg(legs[index])}</span>
-                      {legs[index].estimated && (
-                        <span
-                          title="Straight-line estimate — no road route (e.g. across water)"
-                          className="text-aa-muted/70"
-                        >
-                          (est.)
-                        </span>
-                      )}
                     </div>
                   )}
                 </li>
@@ -377,7 +374,7 @@ export default function TripPanel() {
                   <p className="text-xs font-semibold text-aa-ink">Heading home</p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-aa-muted">
                     After your last stop, {transferHint(departure.km)}
-                    {departure.km >= 15 && <> (~{Math.round(departure.km)} km)</>} back to{" "}
+                    {departure.km >= 15 && <> (about {Math.round(departure.km)} km away)</>} back to{" "}
                     <span className="font-medium text-aa-ink">{departure.gw.city} ({departure.gw.iata})</span>
                     {" "}for your flight home.
                   </p>
