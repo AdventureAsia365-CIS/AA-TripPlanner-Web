@@ -168,17 +168,8 @@ export const COUNTRY_GATEWAY: Record<string, Gateway[]> = {
   ],
 };
 
-// Emoji fallback per activity (used until brand icons are wired everywhere).
-export const ACTIVITY_ICON: Record<string, string> = {
-  trekking: "🥾",
-  cultural_heritage: "🏛️",
-  wildlife_nature: "🐾",
-  water_activities: "🌊",
-  culinary: "🍜",
-  wellness_relaxation: "🧘",
-  adventure_sport: "🪂",
-  local_immersion: "🫖",
-};
+// Activity iconography lives in components/ActivityIcon.tsx (line-style SVGs).
+// The emoji map that used to be here was removed in favour of it.
 
 export const ACTIVITIES = [
   "trekking",
