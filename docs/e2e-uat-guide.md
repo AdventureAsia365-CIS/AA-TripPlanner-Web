@@ -2,7 +2,7 @@
 
 Step-by-step to run the whole product locally and do user-acceptance
 testing. Assumes you're on the WSL host with the repo at
-`/home/nghiep/projects/AA-TripPlanner-Web`.
+`/home/nghiep/projects/AA-Ecosys/apps/AA-TripPlanner-Web`.
 
 ## 0. One-time env hygiene
 Edit `.env` files with **LF** line endings (not CRLF). If you edited them
