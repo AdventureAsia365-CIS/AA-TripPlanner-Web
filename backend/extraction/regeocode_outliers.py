@@ -40,7 +40,10 @@ from backend import config
 # ISO alpha-2, [west, south, east, north] bbox, and centroid (lng, lat).
 # Covers the countries currently present in the data.
 COUNTRY_GEO: dict[str, dict] = {
-    "Laos": {"iso": "la", "bbox": [100.0, 13.5, 108.0, 22.6], "center": (103.85, 18.2)},
+    # center is a DEEP-INTERIOR point (not the bbox midpoint): Laos is narrow
+    # and its bbox spills into Thailand/Vietnam, so a geometric midpoint can
+    # land across the Mekong border. Xieng Khouang plateau is safely inland.
+    "Laos": {"iso": "la", "bbox": [100.0, 13.5, 108.0, 22.6], "center": (103.2, 19.45)},
     "Sri Lanka": {"iso": "lk", "bbox": [79.5, 5.8, 82.0, 10.0], "center": (80.7, 7.9)},
     "South Korea": {"iso": "kr", "bbox": [125.5, 33.0, 130.0, 38.7], "center": (127.8, 36.5)},
     "Nepal": {"iso": "np", "bbox": [80.0, 26.3, 88.3, 30.5], "center": (84.1, 28.4)},
@@ -121,22 +124,19 @@ async def _mapbox_in_country(
 
 
 def _centroid_jitter(name: str, geo: dict) -> tuple[float, float]:
-    """A small, deterministic offset (~±0.4°, roughly ±40 km) from the country
-    centroid, derived from the place name. Spreads centroid-fallback pins so
-    they don't stack into one giant cluster, while staying inside the country.
-    Clamped so the jittered point stays within the country's bbox."""
+    """A small, deterministic (lat,lng) offset (~±0.15°, ~16 km) from the
+    country's interior centroid, derived from the place name — spreads
+    centroid-fallback pins so they don't stack into one point, while staying
+    safely inland."""
     import hashlib
 
     h = hashlib.md5(name.encode("utf-8")).digest()
-    # Map two bytes to [-0.4, 0.4] degrees.
-    dlat = (h[0] / 255.0 - 0.5) * 0.8
-    dlng = (h[1] / 255.0 - 0.5) * 0.8
-    cx, cy = geo["center"]
-    w, s, e, n = geo["bbox"]
-    # Keep a margin so a jittered pin never lands on the border.
-    lat = min(max(cy + dlat, s + 0.3), n - 0.3)
-    lng = min(max(cx + dlng, w + 0.3), e - 0.3)
-    return lat - cy, lng - cx
+    # Map two bytes to [-0.15, 0.15] degrees (~16 km). Small on purpose: the
+    # centroid is a safe interior point, so keep jittered pins close to it and
+    # well away from borders (Laos is narrow).
+    dlat = (h[0] / 255.0 - 0.5) * 0.3
+    dlng = (h[1] / 255.0 - 0.5) * 0.3
+    return dlat, dlng
 
 
 async def _reverse_country_iso(
@@ -154,20 +154,25 @@ async def _reverse_country_iso(
         "types": "country",
         "limit": "1",
     }
-    try:
-        resp = await http.get(url, params=params)
-        resp.raise_for_status()
-        feats = resp.json().get("features") or []
-        if not feats:
+    # Retry a few times: a single network blip must not be read as "no
+    # mismatch" (which would silently skip a wrong-country point).
+    for attempt in range(3):
+        try:
+            resp = await http.get(url, params=params)
+            resp.raise_for_status()
+            feats = resp.json().get("features") or []
+            if not feats:
+                return None
+            code = feats[0].get("properties", {}).get("short_code")
+            if not code:
+                code = feats[0].get("short_code")
+            return code.lower() if isinstance(code, str) else None
+        except Exception:
+            if attempt < 2:
+                await asyncio.sleep(1.0 * (attempt + 1))
+                continue
             return None
-        code = feats[0].get("properties", {}).get("short_code")
-        if not code:
-            # Fall back to the feature id, e.g. "country.123" has no code;
-            # some responses carry short_code at the top level.
-            code = feats[0].get("short_code")
-        return code.lower() if isinstance(code, str) else None
-    except Exception:
-        return None
+    return None
 
 
 async def main() -> None:
@@ -177,39 +182,48 @@ async def main() -> None:
     if not dsn:
         raise SystemExit("Set TRIPPLANNER_DATABASE_URL first.")
 
-    conn = await asyncpg.connect(dsn=dsn, command_timeout=30)
+    conn = await _connect_with_retry(dsn)
     http = httpx.AsyncClient(timeout=20)
     try:
         rows = await conn.fetch(
             "SELECT id, name, country, lat, lng FROM shared.destinations "
             "WHERE country IS NOT NULL AND country <> ''"
         )
+        # Detect: reverse-geocode EVERY point in a mapped country and flag any
+        # whose real country differs from the assigned one. This is the
+        # authoritative check for all six countries (not just bbox outliers),
+        # and catches near-border points a rectangle can't.
         outliers = []
         checked = 0
+        wrong_by_country: dict[str, int] = {}
         for r in rows:
             geo = COUNTRY_GEO.get(r["country"])
             if not geo:
-                continue  # country not mapped — skip
-            lat, lng = float(r["lat"]), float(r["lng"])
-            if not in_bbox(lat, lng, geo["bbox"]):
-                # Clearly outside the country's box — an outlier for sure.
-                outliers.append((r["id"], r["name"], r["country"], geo))
                 continue
-            # Inside the bbox, but the bbox is a rectangle and may spill into
-            # a neighbouring country (Laos's box covers NE Thailand and N
-            # Cambodia). Confirm the point is really in the right country by
-            # reverse-geocoding; only then trust it.
+            lat, lng = float(r["lat"]), float(r["lng"])
             iso = await _reverse_country_iso(http, lat, lng)
             checked += 1
             if iso is not None and iso != geo["iso"]:
                 outliers.append((r["id"], r["name"], r["country"], geo))
-        print(f"[regeocode] {len(outliers)} outliers to fix "
-              f"(of {len(rows)} with a country; reverse-checked {checked})")
+                wrong_by_country[r["country"]] = wrong_by_country.get(r["country"], 0) + 1
+        print(f"[regeocode] reverse-checked {checked}; "
+              f"{len(outliers)} wrong-country: {wrong_by_country}")
 
+        # Fix: re-geocode inside the country; then VERIFY the new coordinate
+        # actually reverse-geocodes to the right country — if not, force the
+        # jittered centroid, which is guaranteed in-country.
         fixed = 0
         by_method: dict[str, int] = {}
         for dest_id, name, country, geo in outliers:
             lat, lng, how = await _mapbox_in_country(http, name, geo)
+            if how != "centroid":
+                got = await _reverse_country_iso(http, lat, lng)
+                if got is not None and got != geo["iso"]:
+                    # Re-geocode still landed in the wrong country — snap to
+                    # the safe jittered centroid instead.
+                    jlat, jlng = _centroid_jitter(name, geo)
+                    cx, cy = geo["center"]
+                    lat, lng, how = cy + jlat, cx + jlng, "centroid_forced"
             await conn.execute(
                 "UPDATE shared.destinations SET lat = $2, lng = $3 WHERE id = $1",
                 dest_id, lat, lng,
@@ -220,21 +234,36 @@ async def main() -> None:
                 print(f"  fixed {fixed}/{len(outliers)}")
         print(f"[regeocode] methods: {by_method}")
 
-        # Report remaining outliers after the pass.
-        remaining = 0
+        # Verify: reverse-check every point again; count any still in the
+        # wrong country (should be 0).
         rows2 = await conn.fetch(
-            "SELECT country, lat, lng FROM shared.destinations "
+            "SELECT name, country, lat, lng FROM shared.destinations "
             "WHERE country IS NOT NULL AND country <> ''"
         )
+        remaining: dict[str, int] = {}
         for r in rows2:
             geo = COUNTRY_GEO.get(r["country"])
-            if geo and not in_bbox(float(r["lat"]), float(r["lng"]), geo["bbox"]):
-                remaining += 1
-        print(f"[regeocode] done. fixed={fixed} "
-              f"still_outside_bbox={remaining}")
+            if not geo:
+                continue
+            got = await _reverse_country_iso(http, float(r["lat"]), float(r["lng"]))
+            if got is not None and got != geo["iso"]:
+                remaining[r["country"]] = remaining.get(r["country"], 0) + 1
+        print(f"[regeocode] done. fixed={fixed} still_wrong_country={remaining}")
     finally:
         await http.aclose()
         await conn.close()
+
+
+async def _connect_with_retry(dsn: str, attempts: int = 5):
+    """Connect to Postgres, retrying a few times — the dev tunnel is flaky."""
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            return await asyncpg.connect(dsn=dsn, command_timeout=30)
+        except Exception as e:  # noqa: BLE001
+            last = e
+            await asyncio.sleep(2.0 * (i + 1))
+    raise SystemExit(f"Could not connect after {attempts} tries: {last}")
 
 
 if __name__ == "__main__":

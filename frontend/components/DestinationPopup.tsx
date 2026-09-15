@@ -41,6 +41,17 @@ export default function DestinationPopup({ destinationId, onClose }: Props) {
 
   return (
     <div className="aa-animate-in absolute right-4 top-4 z-20 w-[22rem] overflow-hidden rounded-2xl border border-aa-line bg-white shadow-aa">
+      {/* Cover image (from shared.destinations.cover_image_url). Only shown
+          when content has supplied a URL; otherwise the header sits flush. */}
+      {detail?.cover_image_url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={detail.cover_image_url}
+          alt={detail.name}
+          className="h-32 w-full object-cover"
+          loading="lazy"
+        />
+      )}
       {/* Header */}
       <div className="flex items-start justify-between gap-3 border-b border-aa-line bg-aa-offwhite px-4 py-3">
         <div className="min-w-0">
