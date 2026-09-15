@@ -20,7 +20,8 @@ class _Pool(Protocol):
 
 async def destination_detail(destination_id: str, *, pool: _Pool) -> dict | None:
     dest = await pool.fetchrow(
-        "SELECT id, name, country FROM shared.destinations WHERE id = $1",
+        "SELECT id, name, country, cover_image_url "
+        "FROM shared.destinations WHERE id = $1",
         destination_id,
     )
     if dest is None:
@@ -39,6 +40,7 @@ async def destination_detail(destination_id: str, *, pool: _Pool) -> dict | None
         "id": str(dest["id"]),
         "name": dest["name"],
         "country": dest["country"],
+        "cover_image_url": dest["cover_image_url"],
         "components": [
             {
                 "id": str(r["id"]),

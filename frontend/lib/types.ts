@@ -23,6 +23,7 @@ export interface DestinationDetail {
   id: string;
   name: string;
   country: string;
+  cover_image_url?: string | null;
   components: Component[];
 }
 
