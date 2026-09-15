@@ -17,15 +17,25 @@ export function tileIdFor(lat: number, lng: number): string {
 // Mapbox Directions: max coordinates per request for the driving profile.
 const MAX_DIRECTIONS_WAYPOINTS = 25;
 
-// A single travel leg between two consecutive waypoints.
+// A single travel leg between two consecutive stops.
+// - mode "road": a real drivable route exists (from Mapbox Directions). We
+//   have a trustworthy distance/duration AND road-following geometry to draw.
+// - mode "flight": no sensible road route (islands/cross-water, or the road
+//   would detour absurdly / across a border, or the stops are simply too far
+//   to drive). We do NOT invent a driving distance; the advisor arranges the
+//   real flight/transfer.
 export interface RouteLeg {
-  // Great-circle vs road distinction: these come from the Directions API
-  // (road-following) when available, else from a straight-line estimate.
-  distanceKm: number;
-  durationMin: number;
-  // true when the values are a straight-line (haversine) estimate because
-  // the Directions API returned no drivable route (islands, cross-water).
-  estimated: boolean;
+  mode: "road" | "flight";
+  // Present only for road legs (from Directions). null for flight legs — we
+  // deliberately don't show a fabricated straight-line "distance".
+  distanceKm: number | null;
+  durationMin: number | null;
+  // Road-following geometry ([lng,lat] coords) for road legs, for drawing the
+  // real route on the map. Empty for flight legs (drawn as a dashed arc).
+  geometry: [number, number][];
+  // The two endpoints, for drawing.
+  from: [number, number];
+  to: [number, number];
 }
 
 // Haversine great-circle distance in km between two [lng,lat] points.
@@ -42,15 +52,22 @@ export function haversineKm(a: [number, number], b: [number, number]): number {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+// A driving leg is only trusted as "road" when the road distance is
+// plausible vs the straight-line distance. If Directions has to detour a lot
+// (road >> straight line) the two stops aren't sensibly road-connected (they
+// route around water or across a border) — treat that as a flight leg rather
+// than draw a snaking line and quote a meaningless distance.
+const MAX_ROAD_DETOUR_RATIO = 1.8; // road km / straight km
+const MAX_DRIVE_KM = 350; // beyond this, call it a flight regardless
+
 /**
- * Fetch per-leg distance + duration between consecutive [lng,lat] waypoints.
- * Uses the Mapbox Directions API (driving profile), which returns one `leg`
- * per pair of waypoints. When no drivable route exists (e.g. crossing water
- * to an island), that leg falls back to a straight-line haversine estimate
- * at an assumed 60 km/h, flagged `estimated: true`.
+ * Resolve each consecutive pair of stops into a travel leg. For each pair we
+ * ask Mapbox Directions (driving) for the real road route + geometry:
+ *   - if a sensible road route exists -> a "road" leg (real km/time + geometry)
+ *   - otherwise -> a "flight" leg (no fabricated distance; drawn as an arc)
  *
- * Returns waypoints.length - 1 legs, or null if the token is missing or
- * there are fewer than 2 waypoints.
+ * Per-pair requests (not one multi-leg request) so each leg gets its own
+ * geometry and road/flight decision. Returns stops.length - 1 legs.
  */
 export async function fetchRouteLegs(
   waypoints: [number, number][],
@@ -58,70 +75,73 @@ export async function fetchRouteLegs(
   if (waypoints.length < 2) return null;
   const pts = waypoints.slice(0, MAX_DIRECTIONS_WAYPOINTS);
 
-  const straightLineLegs = (): RouteLeg[] =>
-    pts.slice(1).map((c, i) => {
-      const km = haversineKm(pts[i], c);
-      return { distanceKm: km, durationMin: (km / 60) * 60, estimated: true };
-    });
+  const flightLeg = (a: [number, number], b: [number, number]): RouteLeg => ({
+    mode: "flight",
+    distanceKm: null,
+    durationMin: null,
+    geometry: [],
+    from: a,
+    to: b,
+  });
 
-  if (!hasMapboxToken()) return straightLineLegs();
+  const legs: RouteLeg[] = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const straight = haversineKm(a, b);
 
-  const coords = pts.map((c) => `${c[0]},${c[1]}`).join(";");
-  const url =
-    `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}` +
-    `?overview=false&access_token=${MAPBOX_TOKEN}`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return straightLineLegs();
-    const data = await res.json();
-    const legs = data?.routes?.[0]?.legs;
-    if (!Array.isArray(legs) || legs.length !== pts.length - 1) {
-      return straightLineLegs();
+    if (!hasMapboxToken() || straight > MAX_DRIVE_KM) {
+      legs.push(flightLeg(a, b));
+      continue;
     }
-    return legs.map((leg: { distance?: number; duration?: number }, i: number) => {
-      const dist = leg?.distance;
-      const dur = leg?.duration;
-      // A 0-distance leg usually means the points aren't road-connected;
-      // fall back to a straight-line estimate for that leg only.
-      if (typeof dist !== "number" || dist <= 0) {
-        const km = haversineKm(pts[i], pts[i + 1]);
-        return { distanceKm: km, durationMin: (km / 60) * 60, estimated: true };
+
+    const url =
+      `https://api.mapbox.com/directions/v5/mapbox/driving/${a[0]},${a[1]};${b[0]},${b[1]}` +
+      `?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        legs.push(flightLeg(a, b));
+        continue;
       }
-      return {
-        distanceKm: dist / 1000,
-        durationMin: (typeof dur === "number" ? dur : 0) / 60,
-        estimated: false,
-      };
-    });
-  } catch {
-    return straightLineLegs();
+      const route = (await res.json())?.routes?.[0];
+      const distM = route?.distance;
+      const geo = route?.geometry?.coordinates;
+      const roadKm = typeof distM === "number" ? distM / 1000 : null;
+      const ok =
+        roadKm !== null &&
+        roadKm > 0 &&
+        Array.isArray(geo) &&
+        geo.length >= 2 &&
+        roadKm <= Math.max(straight * MAX_ROAD_DETOUR_RATIO, straight + 20);
+      if (!ok) {
+        legs.push(flightLeg(a, b));
+        continue;
+      }
+      legs.push({
+        mode: "road",
+        distanceKm: roadKm,
+        durationMin: (typeof route.duration === "number" ? route.duration : 0) / 60,
+        geometry: geo as [number, number][],
+        from: a,
+        to: b,
+      });
+    } catch {
+      legs.push(flightLeg(a, b));
+    }
   }
+  return legs;
 }
 
-// Suggested travel mode between two stops, tuned for AA's adventure trips
-// (not city tours). Distance-based, since we don't have real routing:
-//   short  -> often a trek / boat / short 4WD run
-//   medium -> overland by 4WD, or a river/boat leg
-//   long   -> a scenic overland day, or a domestic flight for big jumps
-// Deliberately hedged ("likely") — an advisor confirms the real logistics.
-export interface TravelMode {
-  icon: string;
-  label: string;
-}
-
-export function suggestTravelMode(km: number): TravelMode {
-  if (km < 8) return { icon: "🥾", label: "on foot or a short transfer" };
-  if (km < 60) return { icon: "🚙", label: "4WD or boat transfer" };
-  if (km < 250) return { icon: "🚙", label: "overland by 4WD (a scenic drive)" };
-  if (km < 500) return { icon: "🚙", label: "a long overland day, or a domestic hop" };
-  return { icon: "✈️", label: "likely a domestic flight" };
-}
-
-// Human-friendly leg label with a mode hint, e.g.
-// "🚙 120 km · ~2h · 4WD or boat transfer".
+// Human-friendly label for a leg.
+//   road   -> "🚙 120 km · ~2h" (real driving distance/time)
+//   flight -> "✈️ Flight or transfer — arranged by your advisor" (no km)
 export function formatLeg(leg: RouteLeg): string {
+  if (leg.mode === "flight" || leg.distanceKm === null) {
+    return "✈️ Flight or transfer — arranged by your advisor";
+  }
   const km = Math.round(leg.distanceKm);
-  const mins = Math.round(leg.durationMin);
+  const mins = Math.round(leg.durationMin ?? 0);
   let time: string;
   if (mins < 60) {
     time = `~${mins} min`;
@@ -130,6 +150,6 @@ export function formatLeg(leg: RouteLeg): string {
     const m = mins % 60;
     time = m === 0 ? `~${h}h` : `~${h}h ${m}m`;
   }
-  const mode = suggestTravelMode(leg.distanceKm);
-  return `${mode.icon} ${km} km · ${time} · ${mode.label}`;
+  const icon = km < 60 ? "🚙" : "🚙";
+  return `${icon} ${km} km · ${time} by road`;
 }
