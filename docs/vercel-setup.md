@@ -8,7 +8,7 @@ deploys automatically:
 - Merge to `main` → **Production** deployment.
 
 Project: `aa-tripplanner` (Vercel), connected to
-`github.com/AdventureAsia365-CIS/AA-TripPlanner-Web`.
+`github.com/AdventureAsia365-Ecosys/AA-TripPlanner-Web`.
 
 ## Required dashboard settings (one-time)
 

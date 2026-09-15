@@ -33,3 +33,6 @@ Thumbs.db
 /.dbcheck*.py
 /.probe*.sql
 /package-lock.json
+
+# AAA (AA-Booking) source docs — PRD/ERD/Figma binaries, kept locally only, not committed
+docs/AAA/
