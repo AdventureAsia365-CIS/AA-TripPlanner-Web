@@ -4,12 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTrip } from "@/lib/useTrip";
 import {
   ACTIVITIES,
-  ACTIVITY_ICON,
   INTENSITIES,
   REGION_OF,
   REGION_ORDER,
 } from "@/lib/types";
 import type { CountryOption } from "@/lib/types";
+import ActivityIcon from "./ActivityIcon";
 
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -220,7 +220,7 @@ export default function FilterChips() {
                           : "border-aa-line bg-white text-aa-ink hover:border-aa-gold/60 hover:bg-aa-gold-soft"
                       }`}
                     >
-                      <span aria-hidden>{ACTIVITY_ICON[a] ?? "•"}</span>
+                      <ActivityIcon activity={a} size={14} />
                       {label(a)}
                     </button>
                   );

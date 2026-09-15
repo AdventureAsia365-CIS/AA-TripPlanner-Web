@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { fetchDestination } from "@/lib/api";
 import type { DestinationDetail } from "@/lib/types";
 import { useTrip } from "@/lib/useTrip";
+import ActivityIcon from "./ActivityIcon";
 
 interface Props {
   destinationId: string;
@@ -13,17 +14,6 @@ interface Props {
 function label(v: string): string {
   return v.replace(/_/g, " ");
 }
-
-const ACTIVITY_ICON: Record<string, string> = {
-  trekking: "🥾",
-  cultural_heritage: "🏛️",
-  wildlife_nature: "🐾",
-  water_activities: "🌊",
-  culinary: "🍜",
-  wellness_relaxation: "🧘",
-  adventure_sport: "🪂",
-  local_immersion: "🫖",
-};
 
 export default function DestinationPopup({ destinationId, onClose }: Props) {
   const { add, remove, inTripComponentIds, itinerary } = useTrip();
@@ -108,7 +98,7 @@ export default function DestinationPopup({ destinationId, onClose }: Props) {
                   <p className="text-sm font-semibold text-aa-ink">{c.name}</p>
                   <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] capitalize text-aa-muted">
                     <span className="inline-flex items-center gap-1 rounded-full bg-aa-sand px-2 py-0.5">
-                      <span aria-hidden>{ACTIVITY_ICON[c.activity] ?? "•"}</span>
+                      <ActivityIcon activity={c.activity} size={13} className="text-aa-gold-dark" />
                       {label(c.activity)}
                     </span>
                     <span className="rounded-full bg-aa-sand px-2 py-0.5">
